@@ -1,0 +1,935 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Delta Neutral Portfolio</title>
+
+    <button id="refreshClosed" class="refresh-btn">
+      🔄 Refresh Closed Positions
+    </button>
+
+    <script>
+      document
+        .getElementById("refreshClosed")
+        .addEventListener("click", async () => {
+          const btn = document.getElementById("refreshClosed");
+          btn.disabled = true;
+          btn.textContent = "⏳ Refreshing...";
+          try {
+            const res = await fetch("/api/closed_positions");
+            const data = await res.json();
+            console.log(
+              "✅ Refreshed closed positions:",
+              data.closed_positions.length
+            );
+            if (window.renderClosedPositions) {
+              renderClosedPositions(data.closed_positions);
+            }
+          } catch (err) {
+            console.error("❌ Error refreshing:", err);
+          } finally {
+            btn.disabled = false;
+            btn.textContent = "🔄 Refresh Closed Positions";
+          }
+        });
+    </script>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        background-color: #0d1117;
+        color: #c9d1d9;
+        font-family: "Inter", sans-serif;
+      }
+      h1,
+      h4 {
+        color: #f0f6fc;
+        font-weight: 600;
+      }
+      .nav-tabs .nav-link {
+        color: #8b949e;
+      }
+      .nav-tabs .nav-link.active {
+        background-color: #161b22;
+        color: #f0f6fc;
+      }
+      .card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        margin-bottom: 20px;
+      }
+      .table {
+        color: #c9d1d9;
+        --bs-table-bg: transparent;
+        --bs-table-striped-bg: #171c28;
+        --bs-table-striped-color: #c9d1d9;
+        --bs-table-hover-bg: #22283a;
+        --bs-table-hover-color: #c9d1d9;
+        border-color: #30363d;
+        font-size: 0.85rem;
+      }
+      .table > :not(caption) > * > * {
+        background-color: #1e1e2d !important;
+        color: #e8e8e8 !important; /* Mejor contraste */
+        border-color: #30363d !important;
+        white-space: nowrap;
+        vertical-align: middle;
+        padding: 0.4rem 0.5rem;
+      }
+      .table .pnl-positive {
+        color: #2ecc71 !important;
+        font-weight: 600;
+      }
+      .table .pnl-negative {
+        color: #e74c3c !important;
+        font-weight: 600;
+      }
+
+      .table thead th,
+      .table thead td {
+        background-color: #2a2a3d;
+        color: #fff;
+        font-size: 0.8rem;
+        padding: 0.5rem;
+      }
+      .table tbody tr {
+        background-color: #1e1e2d;
+        color: #e8e8e8 !important; /* Mejor contraste */
+      }
+      .table-hover > tbody > tr:hover > * {
+        background-color: #22283a !important;
+      }
+
+      .table-striped > tbody > tr:nth-of-type(odd) > * {
+        background-color: #171c28 !important;
+      }
+      .refresh-btn {
+        background: #222;
+        color: #fff;
+        border: none;
+        padding: 8px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: 0.2s;
+      }
+      .refresh-btn:hover {
+        background: #444;
+      }
+      .pnl-positive {
+        color: #2ecc71;
+        font-weight: 600;
+      }
+      .pnl-negative {
+        color: #e74c3c;
+        font-weight: 600;
+      }
+      .card-total {
+        background: linear-gradient(135deg, #1e3c72, #2a5298);
+        color: white;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 20px;
+        text-align: center;
+      }
+      .card-exchange {
+        background: #2b2f3a;
+        color: #fff;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 15px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .card-exchange h5 {
+        margin: 0;
+        font-size: 1.2rem;
+        color: #f0f6fc;
+      }
+      .value-positive {
+        color: #2ecc71;
+        font-weight: bold;
+      }
+      .value-negative {
+        color: #e74c3c;
+        font-weight: bold;
+      }
+      .strategy-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 12px;
+        padding: 15px;
+        margin-bottom: 20px;
+      }
+      .strategy-header {
+        background: linear-gradient(90deg, #1e3a8a, #2563eb);
+        color: white;
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+      }
+      .badge-long {
+        background-color: #16a34a;
+      }
+      .badge-short {
+        background-color: #dc2626;
+      }
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 15px;
+        margin-top: 15px;
+        text-align: center;
+      }
+      .summary-item {
+        background-color: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .summary-item h6 {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #8b949e;
+      }
+      .summary-item p {
+        margin: 0;
+        font-size: 1.1rem;
+        font-weight: bold;
+      }
+
+      /* NUEVOS ESTILOS PARA CLOSED POSITIONS COMPACTOS */
+      .closed-position-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        overflow: hidden;
+      }
+      .closed-position-header {
+        background: linear-gradient(90deg, #5b2085, #37065e);
+        color: white;
+        padding: 8px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .closed-position-header h6 {
+        margin: 0;
+        font-size: 0.9rem;
+        font-weight: 600;
+      }
+      .closed-position-body {
+        padding: 10px;
+      }
+      .closed-position-table {
+        width: 100%;
+        font-size: 0.8rem;
+      }
+      .closed-position-table th {
+        background-color: #2a2a3d;
+        color: #fff;
+        padding: 6px 8px;
+        text-align: center;
+        font-weight: 600;
+      }
+      .closed-position-table td {
+        padding: 6px 8px;
+        text-align: center;
+        border-bottom: 1px solid #30363d;
+        color: #e8e8e8 !important; /* Mejor contraste */
+      }
+      .closed-position-footer {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid #30363d;
+      }
+      .footer-left {
+        display: flex;
+        gap: 20px;
+      }
+      .footer-right {
+        display: flex;
+        gap: 20px;
+      }
+      .footer-item {
+        text-align: center;
+      }
+      .footer-label {
+        font-size: 0.7rem;
+        color: #8b949e;
+        margin-bottom: 2px;
+      }
+      .footer-value {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #e8e8e8; /* Mejor contraste */
+      }
+      .compact-badge {
+        font-size: 0.7rem;
+        padding: 3px 6px;
+      }
+      .header-summary {
+        display: flex;
+        gap: 15px;
+        margin-top: 5px;
+      }
+      .header-summary-item {
+        text-align: center;
+      }
+      .header-summary-label {
+        font-size: 0.65rem;
+        color: #c9d1d9;
+      }
+      .header-summary-value {
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="container mt-4">
+      <h1 class="mb-4">Delta Neutral Portfolio</h1>
+
+      <!-- NAVIGATION TABS -->
+      <ul class="nav nav-tabs" id="portfolioTabs" role="tablist">
+        <li class="nav-item">
+          <button
+            class="nav-link active"
+            id="balances-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#balances"
+            type="button"
+            role="tab"
+          >
+            Balances
+          </button>
+        </li>
+        <li class="nav-item">
+          <button
+            class="nav-link"
+            id="positions-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#positions"
+            type="button"
+            role="tab"
+          >
+            Open Positions
+          </button>
+        </li>
+        <li class="nav-item">
+          <button
+            class="nav-link"
+            id="closed-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#closed"
+            type="button"
+            role="tab"
+          >
+            Closed Positions
+          </button>
+        </li>
+        <li class="nav-item">
+          <button
+            class="nav-link"
+            id="funding-tab"
+            data-bs-toggle="tab"
+            data-bs-target="#funding"
+            type="button"
+            role="tab"
+          >
+            Funding Fees
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content mt-3" id="portfolioTabsContent">
+        <!-- BALANCES -->
+        <div class="tab-pane fade show active" id="balances" role="tabpanel">
+          <div id="balances-container"></div>
+        </div>
+
+        <!-- OPEN POSITIONS -->
+        <div class="tab-pane fade" id="positions" role="tabpanel">
+          <div id="positions-container"></div>
+        </div>
+
+        <!-- CLOSED POSITIONS -->
+        <div class="tab-pane fade" id="closed" role="tabpanel">
+          <div class="card p-3">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h4 class="mb-0">Closed Positions</h4>
+              <button id="refreshClosed" class="refresh-btn">🔄 Refresh</button>
+            </div>
+            <div id="closedPositions" class="mt-2"></div>
+          </div>
+        </div>
+
+        <!-- FUNDING -->
+        <div class="tab-pane fade" id="funding" role="tabpanel">
+          <div id="funding-container"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+    <script>
+      function cleanSymbol(sym) {
+        if (!sym) return "";
+        // Normalizar a mayúsculas
+        sym = sym.toUpperCase();
+
+        // Quitar prefijo PERP_ si lo hay
+        sym = sym.replace(/^PERP_/, "");
+
+        // Quitar sufijos conocidos (USDT, USDC, PERP)
+        sym = sym.replace(/(USDT|USDC|PERP)$/i, "");
+
+        // Quitar _USDT, _USDC, -USDT, -USDC, _PERP
+        sym = sym.replace(/(_|-)(USDT|USDC|PERP)$/i, "");
+
+        // Quitar guiones bajos o medios al final
+        sym = sym.replace(/[_-]+$/i, "");
+
+        // Si todavía quedan separadores, coge la primera parte "limpia"
+        // Ejemplo: "KAITO_USDC" → "KAITO", "BTC-USDC" → "BTC"
+        const parts = sym.split(/[_-]/);
+        if (parts.length > 1) {
+          sym = parts[0];
+        }
+
+        return sym;
+      }
+
+      // === BALANCES ===
+      fetch("/api/balances")
+        .then((r) => r.json())
+        .then((data) => {
+          const container = document.getElementById("balances-container");
+          container.innerHTML = "";
+          const totals = data.totals || {
+            equity: 0,
+            balance: 0,
+            unrealized_pnl: 0,
+          };
+          container.innerHTML += `
+          <div class="card-total">
+            <h3>Portfolio Total</h3>
+            <h2>$${totals.equity.toFixed(2)}</h2>
+            <p>Balance Total: $${totals.balance.toFixed(2)}</p>
+            <p>PnL No Realizado: <span class="${
+              totals.unrealized_pnl >= 0 ? "value-positive" : "value-negative"
+            }">$${totals.unrealized_pnl.toFixed(2)}</span></p>
+          </div>`;
+          data.exchanges.forEach((b) => {
+            container.innerHTML += `
+            <div class="card-exchange">
+              <div>
+                <h5>${b.exchange.toUpperCase()}</h5>
+                <p>Balance: $${parseFloat(b.balance).toFixed(2)}</p>
+                <p>PnL No Realizado: <span class="${
+                  b.unrealized_pnl >= 0 ? "value-positive" : "value-negative"
+                }">$${parseFloat(b.unrealized_pnl || 0).toFixed(2)}</span></p>
+              </div>
+              <div>
+                <strong>Equity:</strong> $${parseFloat(b.equity || 0).toFixed(
+                  2
+                )}<br>
+                <strong>Margin:</strong> $${parseFloat(b.margin || 0).toFixed(
+                  2
+                )}
+              </div>
+            </div>`;
+          });
+        });
+
+      // === OPEN POSITIONS ===
+      fetch("/api/positions")
+        .then((r) => r.json())
+        .then((data) => {
+          const container = document.getElementById("positions-container");
+          container.innerHTML = "";
+          const grouped = {};
+          data.positions.forEach((p) => {
+            const sym = cleanSymbol(p.symbol);
+            if (!grouped[sym]) grouped[sym] = [];
+            grouped[sym].push(p);
+          });
+          Object.entries(grouped).forEach(([symbol, positions]) => {
+            let card = `<div class="strategy-card"><div class="strategy-header"><h5>${cleanSymbol(
+              symbol
+            )} ${
+              positions.length > 1
+                ? '<span class="badge bg-warning text-dark">DELTA NEUTRAL</span>'
+                : ""
+            }</h5></div>
+          <table class="table table-sm table-bordered table-hover">
+          <thead><tr><th>Exchange</th><th>Symbol</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Liq.</th><th>Notional</th><th>Unrealized PnL</th><th>Fee</th><th>Funding Fee</th><th>Realized PnL</th></tr></thead><tbody>`;
+            let totalNotional = 0,
+              totalMargin = 0,
+              sizeLong = 0,
+              sizeShort = 0,
+              unrealizedTotal = 0,
+              realizedTotal = 0;
+            positions.forEach((p) => {
+              totalNotional += parseFloat(p.notional || 0);
+              totalMargin += parseFloat(p.margin || 0);
+              unrealizedTotal += parseFloat(p.unrealized_pnl || 0);
+              realizedTotal += parseFloat(p.realized_pnl || 0);
+              if (p.side && p.side.toLowerCase() === "long")
+                sizeLong += parseFloat(p.size || 0);
+              if (p.side && p.side.toLowerCase() === "short")
+                sizeShort += parseFloat(p.size || 0);
+              card += `<tr>
+              <td>${p.exchange}</td><td>${cleanSymbol(p.symbol)}</td>
+              <td><span class="badge ${
+                p.side === "long" ? "badge-long" : "badge-short"
+              }">${p.side.toUpperCase()}</span></td>
+              <td>${p.size}</td>
+              <td>${p.entry_price.toFixed(4) || ""}</td>
+              <td>${p.mark_price.toFixed(4) || ""}</td>
+              <td>${p.liquidation_price.toFixed(4) || ""}</td>
+              <td>${p.notional}</td>
+              <td class="${
+                (p.unrealized_pnl || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+              }">${(p.unrealized_pnl || 0).toFixed(2)}</td>
+              <td class="${
+                (p.fee || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+              }">
+                ${(p.fee || 0).toFixed(2)}
+              </td>
+              <td class="${
+                (p.funding_fee || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+              }">
+                ${(p.funding_fee || 0).toFixed(2)}
+              </td>
+              <td class="${
+                (p.realized_pnl || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+              }">${(p.realized_pnl || 0).toFixed(2)}</td>
+            </tr>`;
+            });
+            card += `</tbody></table>
+          <div class="summary-grid">
+            <div class="summary-item"><h6>Total Notional</h6><p>$${totalNotional.toFixed(
+              2
+            )}</p></div>
+            <div class="summary-item"><h6>Total Margin</h6><p>$${totalMargin.toFixed(
+              2
+            )}</p></div>
+            <div class="summary-item"><h6>Size Long</h6><p>${sizeLong}</p></div>
+            <div class="summary-item"><h6>Size Short</h6><p>${sizeShort}</p></div>
+            <div class="summary-item"><h6>Net Exposure</h6><p>${(
+              sizeLong - sizeShort
+            ).toFixed(2)}</p></div>
+            <div class="summary-item"><h6>Unrealized PnL</h6><p class="${
+              unrealizedTotal >= 0 ? "pnl-positive" : "pnl-negative"
+            }">$${unrealizedTotal.toFixed(2)}</p></div>
+            <div class="summary-item"><h6>Realized PnL</h6><p class="${
+              realizedTotal >= 0 ? "pnl-positive" : "pnl-negative"
+            }">$${realizedTotal.toFixed(2)}</p></div>
+          </div></div>`;
+            container.innerHTML += card;
+          });
+        });
+
+      // === FUNDING FEES ===
+      fetch("/api/funding")
+        .then((r) => r.json())
+        .then((data) => {
+          const container = document.getElementById("funding-container");
+
+          // Ordenar funding por fecha descendente
+          const sorted = data.funding.sort((a, b) => {
+            const ta = new Date(a.timestamp).getTime();
+            const tb = new Date(b.timestamp).getTime();
+            return tb - ta;
+          });
+
+          // Agrupar por día (YYYY-MM-DD)
+          const grouped = {};
+          sorted.forEach((f) => {
+            const day = f.timestamp
+              ? new Date(f.timestamp).toISOString().split("T")[0]
+              : "Unknown";
+            if (!grouped[day]) grouped[day] = [];
+            grouped[day].push(f);
+          });
+
+          // Construir HTML
+          let html = "";
+          Object.entries(grouped).forEach(([day, rows]) => {
+            html += `
+                <div class="strategy-card">
+                <div class="strategy-header">
+                    <h5>${day}</h5>
+                    <p>
+                    Total Funding: 
+                    <span class="${
+                      rows.reduce((sum, f) => sum + (f.income || 0), 0) >= 0
+                        ? "pnl-positive"
+                        : "pnl-negative"
+                    }">
+                        ${rows
+                          .reduce((sum, f) => sum + (f.income || 0), 0)
+                          .toFixed(2)}
+                    </span>
+                    </p>
+                </div>
+                <table class="table table-sm table-bordered table-hover table-striped">
+                    <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Exchange</th>
+                        <th>Symbol</th>
+                        <th>Income</th>
+                        <th>Asset</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    ${rows
+                      .map(
+                        (f) => `
+                        <tr>
+                        <td>${
+                          f.timestamp
+                            ? new Date(f.timestamp).toLocaleTimeString()
+                            : ""
+                        }</td>
+                        <td>${f.exchange}</td>
+                        <td>${cleanSymbol(f.symbol)}</td>
+                        <td class="${
+                          (f.income || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+                        }">
+                            ${(f.income || 0).toFixed(2)}
+                        </td>
+                        <td>${f.asset}</td>
+                        </tr>`
+                      )
+                      .join("")}
+                    </tbody>
+                </table>
+                </div>
+            `;
+          });
+
+          container.innerHTML = html;
+        })
+        .catch((err) => {
+          console.error("❌ Error loading funding fees:", err);
+          document.getElementById("funding-container").innerHTML =
+            "<p>Error loading funding fees</p>";
+        });
+
+      async function loadClosedPositions() {
+        const res = await fetch("/api/closed_positions");
+        const data = await res.json();
+        const positions = data.closed_positions || [];
+        const container = document.getElementById("closedPositions");
+        container.innerHTML = "";
+        // para deduplicar: (símboloBase | open | close) de grupos ya renderizados como delta-neutral
+        const renderedDN = new Set();
+
+        positions.forEach((group) => {
+          // base del símbolo (2ZUSDT/2ZUSDC -> 2Z, KAITOUSDC -> KAITO)
+          const baseSymbol = cleanSymbol(
+            group.symbol || (group.positions?.[0]?.symbol ?? "")
+          );
+          const windowKey = `${baseSymbol}|${group.open_date || ""}|${
+            group.close_date || ""
+          }`;
+          // construimos filas y, a la vez, contamos LONG/SHORT REALES (sideLabel)
+          let longCount = 0;
+          let shortCount = 0;
+
+          const rowsHtml = (group.positions || [])
+            .map((p) => {
+              // side "real" para mostrar
+              let sideLabel = "";
+              if ((p.side || "").toLowerCase() === "closed") {
+                sideLabel =
+                  Number(p.close_price) >= Number(p.entry_price)
+                    ? "LONG"
+                    : "SHORT";
+              } else {
+                sideLabel = (p.side || "").toUpperCase();
+              }
+
+              if (sideLabel === "LONG") longCount++;
+              if (sideLabel === "SHORT") shortCount++;
+
+              let pnl;
+              if ((p.side || "").toLowerCase() === "short") {
+                pnl =
+                  (Number(p.entry_price) - Number(p.close_price)) *
+                  Number(p.size || 0);
+              } else {
+                pnl =
+                  (Number(p.close_price) - Number(p.entry_price)) *
+                  Number(p.size || 0);
+              }
+              return `
+                    <tr>
+                    <td>${p.exchange}</td>
+                    <td>${cleanSymbol(p.symbol)}</td>
+                    <td>
+                        ${(() => {
+                          // mismo criterio que usamos antes para sideLabel:
+                          const lbl =
+                            (p.side || "").toLowerCase() === "closed"
+                              ? Number(p.close_price) >= Number(p.entry_price)
+                                ? "LONG"
+                                : "SHORT"
+                              : (p.side || "").toUpperCase();
+                          const cls =
+                            lbl === "LONG"
+                              ? "bg-success compact-badge"
+                              : "bg-danger compact-badge";
+                          return `<span class="badge ${cls}">${lbl}</span>`;
+                        })()}
+                    </td>
+                    <td>${Number(p.size).toFixed(2)}</td>
+                    <td>${Number(p.entry_price).toFixed(4)}</td>
+                    <td>${Number(p.close_price).toFixed(4)}</td>
+                    <td class="${
+                      pnl >= 0 ? "text-success" : "text-danger"
+                    } fw-bold">
+                        $${pnl.toFixed(2)}
+                    </td>
+                    <td class="${
+                      Number(p.fees) < 0 ? "text-danger" : "text-success"
+                    } fw-bold">
+                        $${Number(p.fees).toFixed(2)}
+                    </td>
+                    <td class="${
+                      Number(p.funding_fee) < 0 ? "text-danger" : "text-success"
+                    } fw-bold">
+                        $${Number(p.funding_fee).toFixed(2)}
+                    </td>
+                    <td class="${
+                      Number(p.realized_pnl) < 0
+                        ? "text-danger"
+                        : "text-success"
+                    } fw-bold">
+                        $${Number(p.realized_pnl).toFixed(2)}
+                    </td>
+                    </tr>`;
+            })
+            .join("");
+
+          // badge SOLO si hay al menos un long y un short en el MISMO grupo
+          const deltaNeutral = longCount > 0 && shortCount > 0;
+          const deltaNeutralBadge = deltaNeutral
+            ? '<span class="badge bg-warning text-dark compact-badge ms-2">DELTA NEUTRAL</span>'
+            : "";
+
+          // ⛔ si NO es DN y ya pinté la DN de la misma ventana, salto este grupo suelto
+          if (!deltaNeutral && renderedDN.has(windowKey)) return;
+
+          // ✅ si es DN, marco esta ventana para ocultar los sueltos duplicados que vengan después
+          if (deltaNeutral) renderedDN.add(windowKey);
+
+          // Si NO es delta neutral, evita combinar más de una posición del mismo tipo
+          if (!deltaNeutral && (group.positions || []).length > 1) {
+            (group.positions || []).forEach((p) => {
+              let pnl;
+              if ((p.side || "").toLowerCase() === "short") {
+                pnl =
+                  (Number(p.entry_price) - Number(p.close_price)) *
+                  Number(p.size || 0);
+              } else {
+                pnl =
+                  (Number(p.close_price) - Number(p.entry_price)) *
+                  Number(p.size || 0);
+              }
+              const pnlClass = pnl >= 0 ? "text-success" : "text-danger";
+              const realizedClass =
+                Number(p.realized_pnl) >= 0 ? "text-success" : "text-danger";
+              const feeClass =
+                Number(p.fees) < 0 ? "text-danger" : "text-success";
+              const fundingClass =
+                Number(p.funding_fee) < 0 ? "text-danger" : "text-success";
+
+              container.innerHTML += `
+                <div class="closed-position-card">
+                  <div class="closed-position-header">
+                    <div>
+                      <h6>${cleanSymbol(p.symbol)} ${deltaNeutralBadge}</h6>
+                      <div class="header-summary">
+                        <div class="header-summary-item">
+                          <div class="header-summary-label">Open</div>
+                          <div class="header-summary-value text-white">${
+                            group.open_date
+                          }</div>
+                        </div>
+                        <div class="header-summary-item">
+                          <div class="header-summary-label">Close</div>
+                          <div class="header-summary-value text-white">${
+                            group.close_date
+                          }</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="header-summary">
+                      <div class="header-summary-item">
+                        <div class="header-summary-label">Total PnL</div>
+                        <div class="header-summary-value ${pnlClass}">$${pnl.toFixed(
+                2
+              )}</div>
+                      </div>
+                      <div class="header-summary-item">
+                        <div class="header-summary-label">Total Fees</div>
+                        <div class="header-summary-value text-danger">$${Number(
+                          p.fees
+                        ).toFixed(2)}</div>
+                      </div>
+                      <div class="header-summary-item">
+                        <div class="header-summary-label">Total Funding</div>
+                        <div class="header-summary-value ${fundingClass}">$${Number(
+                p.funding_fee
+              ).toFixed(2)}</div>
+                      </div>
+                      <div class="header-summary-item">
+                        <div class="header-summary-label">Total Realized</div>
+                        <div class="header-summary-value ${realizedClass}">$${Number(
+                p.realized_pnl
+              ).toFixed(2)}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="closed-position-body">
+                    <table class="closed-position-table">
+                      <thead>
+                        <tr>
+                          <th>Exchange</th><th>Symbol</th><th>Side</th><th>Size</th>
+                          <th>Entry</th><th>Close</th><th>PnL</th>
+                          <th>Fees</th><th>Funding</th><th>Realized</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>${p.exchange}</td>
+                          <td>${cleanSymbol(p.symbol)}</td>
+                          <td>
+                            <span class="badge ${
+                              p.side === "long"
+                                ? "bg-success compact-badge"
+                                : "bg-danger compact-badge"
+                            }">
+                              ${p.side.toUpperCase()}
+                            </span>
+                          </td>
+                          <td>${Number(p.size).toFixed(2)}</td>
+                          <td>${Number(p.entry_price).toFixed(4)}</td>
+                          <td>${Number(p.close_price).toFixed(4)}</td>
+                          <td class="${pnlClass} fw-bold">$${pnl.toFixed(
+                2
+              )}</td>
+                          <td class="${feeClass} fw-bold">$${Number(
+                p.fees
+              ).toFixed(2)}</td>
+                          <td class="${fundingClass} fw-bold">$${Number(
+                p.funding_fee
+              ).toFixed(2)}</td>
+                          <td class="${realizedClass} fw-bold">$${Number(
+                p.realized_pnl
+              ).toFixed(2)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              `;
+            });
+            return; // evitar seguir con el bloque combinado
+          }
+
+          const card = `
+                <div class="closed-position-card">
+                <div class="closed-position-header">
+                  <div>
+                    <h6>${cleanSymbol(group.symbol)} ${deltaNeutralBadge}</h6>
+                    <div class="header-summary">
+                      <div class="header-summary-item">
+                        <div class="header-summary-label">Open</div>
+                        <div class="header-summary-value text-white">${
+                          group.open_date
+                        }</div>
+                      </div>
+                      <div class="header-summary-item">
+                        <div class="header-summary-label">Close</div>
+                        <div class="header-summary-value text-white">${
+                          group.close_date
+                        }</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="header-summary">
+                    <div class="header-summary-item">
+                      <div class="header-summary-label">Total PnL</div>
+                      <div class="header-summary-value ${
+                        Number(group.pnl_total) >= 0
+                          ? "text-success"
+                          : "text-danger"
+                      }">
+                      $${Number(group.pnl_total).toFixed(2)}
+                      </div>
+                    </div>
+                    <div class="header-summary-item">
+                      <div class="header-summary-label">Total Fees</div>
+                      <div class="header-summary-value text-danger">$${Number(
+                        group.fees_total
+                      ).toFixed(2)}</div>
+                    </div>
+                    <div class="header-summary-item">
+                      <div class="header-summary-label">Total Funding</div>
+                      <div class="header-summary-value ${
+                        Number(group.funding_total) >= 0
+                          ? "text-success"
+                          : "text-danger"
+                      }">
+                      $${Number(group.funding_total).toFixed(2)}
+                      </div>
+                    </div>
+                    <div class="header-summary-item">
+                      <div class="header-summary-label">Total Realized</div>
+                      <div class="header-summary-value ${
+                        Number(group.realized_total) >= 0
+                          ? "text-success"
+                          : "text-danger"
+                      }">
+                      $${Number(group.realized_total).toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="closed-position-body">
+                    <table class="closed-position-table">
+                        <thead>
+                        <tr>
+                            <th>Exchange</th><th>Symbol</th><th>Side</th><th>Size</th>
+                            <th>Entry</th><th>Close</th><th>PnL</th>
+                            <th>Fees</th><th>Funding</th><th>Realized</th>
+                        </tr>
+                        </thead>
+                        <tbody>${rowsHtml}</tbody>
+                    </table>
+                </div>
+                </div>`;
+          container.innerHTML += card;
+        });
+      }
+
+      loadClosedPositions();
+    </script>
+  </body>
+</html>

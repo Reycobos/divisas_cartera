@@ -1,0 +1,893 @@
+PROMPT (cópialo tal cual)
+
+Quiero que generes un adapter Python para integrar un nuevo exchange en mi dashboard de estrategias delta-neutral, respetando al milímetro los contratos ya usados por mi front y backend. Razona en privado y entrégame solo resultados concretos (código, diffs, tests y pasos). No muestres cadena de pensamiento.
+
+Contexto real (ficheros/contratos existentes que debes cumplir)
+
+Front indexv4.6.html:
+
+La pestaña Balances pinta por exchange: spot, margin, futures, más equity y unrealized_pnl. El JSON lo saca de GET /api/balances y usa exactamente estas claves. 
+
+indexv4.6
+
+La pestaña Open Positions espera por fila: exchange, symbol, side, size, entry_price, mark_price, liquidation_price, notional, unrealized_pnl, fee, funding_fee, realized_pnl. 
+
+indexv4.6
+
+La pestaña Closed consume GET /api/closed_positions; cada leg trae fees y funding_fee (alias de DB). El “PnL” mostrado en la tabla es solo precio (el front lo recalcula con close-entry y size). El “Realized” mostrado es el total neto (precio + fees + funding) que debe venir desde la DB en realized_pnl. 
+
+indexv4.6
+
+DB db_manager.py:
+
+Tabla closed_positions con columnas: realized_pnl, funding_total, fee_total (las fees se normalizan siempre negativas en save_closed_position). 
+
+db_manager
+
+Ruta /api/closed_positions (servidor):
+
+Cuando lee de DB hace SELECT ..., realized_pnl, funding_total AS funding_fee, fee_total AS fees, ... y el front consume fees/funding_fee. Mantén este shape. (Ya está implementado en mi servidor).
+
+Toggles (servidor):
+
+SYNC_ALL / SYNC_EXCHANGES con should_sync(exchange) para guardar cerradas.
+
+BALANCE_ALL / BALANCE_EXCHANGES con should_fetch_balance(exchange) para pedir balances. (Respeta estos toggles al integrar).
+
+Objetivo
+
+Crear adapters/<exchange_slug>.py con estas funciones públicas (expórtalas en __all__):
+
+fetch_<exchange>_open_positions(...)
+
+fetch_<exchange>_funding_fees(limit: int = 50, ...)
+
+fetch_<exchange>_all_balances(...) ← Debe mapear Spot/Margin/Futures como lo pinta el HTML (ver “Balances” abajo).
+
+save_<exchange>_closed_positions(db_path: str = "portfolio.db", ...) ← Guarda en SQLite usando save_closed_position(...).
+
+No crees rutas Flask aquí. El servidor principal ya las usa.
+
+Reglas de datos y cálculo (obligatorias)
+
+A) Normalización de símbolo (usar SIEMPRE):
+
+import re
+def normalize_symbol(sym: str) -> str:
+    if not sym: return ""
+    s = sym.upper()
+    s = re.sub(r'^PERP_', '', s)
+    s = re.sub(r'(_|-)?(USDT|USDC|PERP)$', '', s)  # quita sufijos y separador previo
+    s = re.sub(r'[_-]+$', '', s)                   # guiones finales
+    s = re.split(r'[_-]', s)[0]                    # primera parte limpia (KAITO_USDC -> KAITO)
+    return s
+
+
+B) Open positions — shape EXACTO (por fila) (lo que el front lee): 
+
+indexv4.6
+
+{
+  "exchange": "<exchange_slug>",
+  "symbol": "<normalize_symbol>",
+  "side": "long" | "short",
+  "size": float,
+  "entry_price": float,
+  "mark_price": float,
+  "liquidation_price": float | 0.0,
+  "notional": float,
+  "unrealized_pnl": float,    // SOLO precio = (mark - entry) * size (ajusta por side)
+  "fee": float,               // acumulado de fees; NEGATIVO si es costo
+  "funding_fee": float,       // + cobro / - pago
+  "realized_pnl": float       // = fee + funding_fee (solo abiertas)
+}
+
+
+En abiertas, “Realized PnL” del front es fees + funding (no incluye precio).
+
+C) Funding history — shape EXACTO (por fila):
+
+{
+  "exchange": "<exchange_slug>",
+  "symbol": "<normalize_symbol>",
+  "income": float,        // + cobro / - pago
+  "asset": "USDT"|"USDC"|"USD",
+  "timestamp": int,       // epoch ms
+  "funding_rate": float | 0.0,
+  "type": "FUNDING_FEE"
+}
+
+
+D) Balances — estructura EXACTA (front Balances): 
+
+indexv4.6
+
+
+Tu fetch_<exchange>_all_balances(...) debe devolver un único dict con:
+
+{
+  "exchange": "<exchange_slug>",
+  "equity": float,
+  "balance": float,           // saldo utilizable total
+  "unrealized_pnl": float,    // 0.0 si no aplica
+  "initial_margin": float | 0.0,
+  "spot": float | 0.0,        // SOLO spot
+  "margin": float | 0.0,      // SOLO margin
+  "futures": float | 0.0      // SOLO derivados/futuros
+}
+
+
+NO mezcles buckets. Si el exchange no tiene margin o spot, pon 0.0. El front muestra por exchange:
+
+Spot → b.spot
+
+Margin → b.margin
+
+Futures → b.futures
+
+Total Equity → b.equity
+
+PnL No Realizado → b.unrealized_pnl
+(Esto está cableado en el HTML). 
+
+indexv4.6
+
+E) Closed positions → persistencia en SQLite (save_closed_position)
+Guarda por fila (tabla closed_positions): 
+
+db_manager
+
+{
+  "exchange": "<exchange_slug>",
+  "symbol": "<normalize_symbol>",
+  "side": "long"|"short"|"closed",
+  "size": float,
+  "entry_price": float,
+  "close_price": float,
+  "open_time": int,          // epoch s
+  "close_time": int,         // epoch s
+  "realized_pnl": float,     // **TOTAL NETO** = precio + fees + funding (esto es lo que el front pinta como "Realized")
+  "funding_total": float,    // funding acumulado (+/-)
+  "fee_total": float,        // **siempre negativa** (costo)
+  "notional": float,
+  "leverage": float | null,
+  "liquidation_price": float | null
+}
+
+
+En cerradas, el front mostrará:
+
+PnL (tabla) = solo precio (lo recalcula él con close-entry y size).
+
+Fees = fees (que viene de tu fee_total).
+
+Funding = funding_fee (alias de funding_total).
+
+Realized = realized_pnl (neto).
+La ruta ya aliasa funding_total AS funding_fee y fee_total AS fees. Tú solo guarda bien.
+
+F) Fórmulas y signos (clave):
+
+Convención:
+pnl_neto = price_pnl + funding_total + fee_total con fee_total negativo.
+⇒ price_pnl = pnl_neto - funding_total - fee_total
+
+Abiertas:
+unrealized_pnl = (mark - entry) * size (ajusta signo por side).
+realized_pnl (open) = fee_total + funding_total (fees negativas + funding +/-).
+
+Cerradas:
+realized_pnl (DB) = pnl_neto (lo que da la API como neto).
+Para size cuando haga falta reconstruirlo:
+size = |price_pnl| / |close - entry| con fallback por ROE/leverage si close≈entry.
+
+Calidad de código del adapter
+
+Archivo completo adapters/<exchange_slug>.py con:
+
+__all__ exponiendo las 4 funciones.
+
+Manejo robusto de floats/Decimal, backoff, paginación, límites de ventana de la API.
+
+Normalización de símbolo con normalize_symbol.
+
+Docstrings con endpoints y ejemplo de payload.
+
+if __name__ == "__main__": con smoke tests (--dry-run por defecto).
+
+Integración con el servidor (toggles)
+
+Entrega diffs precisos para enchufar el exchange respetando mis toggles:
+
+Sincronización de cerradas (usa should_sync(exchange)):
+
+En el diccionario sync_functions de main() agrega:
+
+"<exchange_slug>": lambda: save_<exchange_slug>_closed_positions("portfolio.db", debug=False)
+
+
+No ejecutes si should_sync("<exchange_slug>") es False.
+
+Pedir balances (usa should_fetch_balance(exchange)):
+
+En main_balances() agrega al dict balance_functions:
+
+"<exchange_slug>": lambda: fetch_<exchange_slug>_all_balances(db_path="portfolio.db")
+
+
+Respeta el early-continue si should_fetch_balance("<exchange_slug>") es False.
+
+Toggles:
+
+Añade "<exchange_slug>": False en:
+
+SYNC_EXCHANGES = { ... }
+BALANCE_EXCHANGES = { ... }
+
+
+Comentario: “cámbialo a True para activar”.
+
+La ruta /api/balances debe seguir devolviendo:
+
+return jsonify({
+  "totals": { "equity": total_equity, "balance": total_balance, "unrealized_pnl": total_unreal },
+  "exchanges": balances
+})
+
+
+No rompas este shape (el front itera data.exchanges con esos campos). 
+
+indexv4.6
+
+Debug & utilidades (inclúyelos en el adapter)
+
+debug_preview_<exchange_slug>_closed(days=3, symbol=None)
+Imprime exactamente lo que se guardaría (campos DB) y calcula price_pnl = realized_pnl - funding_total - fee_total para validar contra precios.
+
+Script aparte debug_save_<exchange_slug>.py (en la raíz):
+
+Fetch (preview), guardar en portfolio.db usando save_closed_position,
+
+Leer últimas cerradas de ese exchange,
+
+Simular el JSON de /api/closed_positions (alias funding_total AS funding_fee, fee_total AS fees) para ver lo mismo que el front.
+
+Tests mínimos (pytest)
+
+normalize_symbol() con casos raros.
+
+Mapper de balances: colocar correctamente spot/margin/futures/equity/unrealized_pnl.
+
+Cálculo de unrealized_pnl en abiertas y realized_pnl neto en cerradas.
+
+Reconstrucción de size desde price_pnl y fallback por ROE/leverage.
+
+Firmas/autenticación (mock) y paginación.
+
+Entregables
+
+adapters/<exchange_slug>.py completo (imports, __all__, código productivo, smoke tests, debug preview).
+
+Diffs para el servidor (alta en sync_functions, main_balances(), y toggles).
+
+Script debug_save_<exchange_slug>.py.
+
+Ejemplos JSON para:
+
+/api/balances (con los tres buckets por exchange, tal cual los usa el front),
+
+/api/positions, /api/closed_positions, /api/funding.
+
+Instrucciones de prueba (curl/HTTPie) y checklist de aceptación:
+
+Front muestra Spot/Margin/Futures correctos,
+
+Totales coherentes,
+
+DB persiste cerradas con fee_total negativa y realized_pnl neto,
+
+Ningún exchange existente se rompe.
+
+Nota: respeta exactamente los nombres de claves y estructuras citadas del front/DB; el HTML ya depende de ellas. 
+
+db_manager   . Te paso la documentacion de la api .
+Signature
+API Verification
+Initiate a request
+The header of all REST requests must contain the following http headers：
+
+ACCESS-KEY：API KEY as a string
+ACCESS-SIGN：Sign with base64 encoding (see HMAC and RSA sample code).
+ACCESS-TIMESTAMP：Timestamp of your request. Value equals to milliseconds since Epoch.
+ACCESS-PASSPHRASE：The password you set when created the API KEY.
+Content-Type：Please set to application/json for all POST request
+locale: Support language such as: Chinese (zh-CN), English (en-US)
+How to get ACCESS-TIMESTAMP
+Java
+Python
+Go
+JS
+PHP
+Long timestamp = System.currentTimeMillis();
+Generate Signature
+The request header of ACCESS-SIGN is to encrypt timestamp + method.toUpperCase() + requestPath + "?" + queryString + body string (+ means string concat) by HMAC SHA256 algorithm with secretKey. and encode the encrypted result through BASE64.
+
+Description of each parameter in the signature
+timestamp：Same as ACCESS-TIMESTAMP request header. Value equals to milliseconds since Epoch.
+method：Request method (POST/GET), all uppercase.
+requestPath：Request interface path.
+queryString：The query string in the request URL (the request parameter after the ?).
+body：The request body in string format. If the request body is empty (usually a GET request), the body can be omitted.
+If the queryString is empty, signature content
+
+timestamp + method.toUpperCase() + requestPath + body
+
+If the queryString not empty, signature content
+
+timestamp + method.toUpperCase() + requestPath + "?" + queryString + body
+
+Sample Code
+Get contract depth information, let's take BTCUSDT as an example:
+
+timestamp = 16273667805456
+method = "GET"
+requestPath = "/api/mix/v2/market/depth"
+queryString= "?limit=20&symbol=BTCUSDT"
+Generate the content to be signed:
+
+16273667805456GET/api/mix/v2/market/depth?limit=20&symbol=BTCUSDT
+
+Contract order, take BTCUSDT as an example:
+
+timestamp = 16273667805456
+method = "POST"
+requestPath = "/api/v2/mix/order/place-order"
+body = {"productType":"usdt-futures","symbol":"BTCUSDT","size":"8","marginMode":"crossed","side":"buy","orderType":"limit","clientOid":"channel#123456"}
+Generate the content to be signed:
+
+16273667805456POST/api/v2/mix/order/place-order{"productType":"usdt-futures","symbol":"BTCUSDT","size":"8","marginMode":"crossed","side":"buy","orderType":"limit","clientOid":"channel#123456"}
+
+Steps to generate the final signature
+HMAC
+
+HMAC sample code
+Step 1. Use the private key **secretkey** to encrypt the string to be signed with hmac sha256
+String payload = hmac_sha256(secretkey, Message);
+
+Step 2. Base64 encoding for Signature.
+String signature = base64.encode(payload);
+
+RSA
+
+RSA sample code
+Step 1. Use the RSA privateKey privateKey to encrypt the string to be signed with SHA-256
+
+Step 2. Base64 encoding for Signature.
+
+HMAC
+HMAC Signature Demo Code
+Java
+Python
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+import javax.management.RuntimeErrorException;
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
+import org.springframework.util.Base64Utils;
+
+@Slf4j
+public class CheckSign {
+
+  private static final String secretKey = "";
+
+
+  public static void main(String[] args) throws Exception {
+    //POST sign example
+//        String timestamp = "1684813405151";
+//        String body = "{\"symbol\":\"TRXUSDT\",\"marginCoin\":\"USDT\",\"size\":551,\"side\":\"buy\",\"orderType\":\"limit\",\"price\":0.0555,\"force\":\"normal\"}";
+//
+//        String sign = generate(timestamp,"POST","/api/v2/mix/order/place-order" ,null,body,secretKey);
+//        log.info("sign:{}",sign);
+
+
+    //GET sign example
+    String timestamp = "1684814440729";
+    String queryString = "marginCoin=usdt&symbol=btcusdt"; // Need to be sorted in ascending alphabetical order by key
+    String sign = generate(timestamp,"GET","/api/v2/mix/account/account" ,queryString,null,secretKey);
+    log.info("sign:{}",sign);
+  }
+
+
+
+  private static Mac MAC;
+
+  static {
+    try {
+      CheckSign.MAC = Mac.getInstance("HmacSHA256");
+    } catch (NoSuchAlgorithmException var1) {
+      throw new RuntimeErrorException(new Error("Can't get Mac's instance."));
+    }
+  }
+
+  public static String generate(String timestamp, String method, String requestPath,
+                                String queryString, String body, String secretKey)
+          throws CloneNotSupportedException, InvalidKeyException, UnsupportedEncodingException {
+
+    method = method.toUpperCase();
+    body = StringUtils.defaultIfBlank(body, StringUtils.EMPTY);
+    queryString = StringUtils.isBlank(queryString) ? StringUtils.EMPTY : "?" + queryString;
+    String preHash = timestamp + method + requestPath + queryString + body;
+    log.info("preHash:{}",preHash);
+    byte[] secretKeyBytes = secretKey.getBytes("UTF-8");
+    SecretKeySpec secretKeySpec = new SecretKeySpec(secretKeyBytes, "HmacSHA256");
+    Mac mac = (Mac) CheckSign.MAC.clone();
+    mac.init(secretKeySpec);
+    return Base64.getEncoder().encodeToString(mac.doFinal(preHash.getBytes("UTF-8")));
+  }
+
+}
+
+Get Account Information
+Frequency limit: 1 time/1s (User ID)
+
+Description
+Get account information
+
+HTTP Request
+GET /api/v2/spot/account/info
+Request Example
+curl "https://api.bitget.com/api/v2/spot/account/info" \
+   -H "ACCESS-KEY:*******" \
+   -H "ACCESS-SIGN:*" \
+   -H "ACCESS-PASSPHRASE:*" \
+   -H "ACCESS-TIMESTAMP:1659076670000" \
+   -H "locale:en-US" \
+   -H "Content-Type: application/json"
+
+Request Parameters
+Parameter	Type	Required	Description
+N/A			
+Response Example
+{
+    "code": "00000",
+    "msg": "success",
+    "requestTime": 1695808949356,
+    "data": {
+        "userId": "**********",
+        "inviterId": "**********",
+        "ips": "127.0.0.1",
+        "authorities": [
+            "trade",
+            "readonly"
+        ],
+        "parentId": 1,
+        "traderType": "trader",
+        "channelCode": "XXX",
+        "channel": "YYY",
+        "regisTime":"1246566789345"
+    }
+}
+
+Response Parameters
+Parameter	Type	Description
+userId	String	User ID
+inviterId	String	Inviter's user ID
+channelCode	String	Affiliate referral code
+channel	String	Affiliate
+ips	String	IP whitelist
+authorities	Array	Permissions
+Read only
+coor: futures orders
+cpor: futures holdings
+stor: spot trade
+smor: margin trade
+ttor: copy trading
+wtor: wallet transfer
+taxr: taxation
+chor: subaccount
+p2pr: P2P query
+Read and Write
+coow: futures orders
+cpow: futures holdings
+stow: spot trade
+smow: margin trade
+ttow: copy trading
+wtow: wallet transfer
+wwow: wallet withdrawl
+chow: subaccount manage
+p2p: P2P
+pllw: Pledge Loan Write
+pllr: Pledge Loan Read
+taxw: Tax Read and Write
+parentId	Int	Main account user ID
+traderType	String	trader: Is trader, not_trader: not trader
+regisTime	String	Register time
+Funding Assets
+Frequency limit: 10 times/1s (User ID)
+
+HTTP Request
+GET /api/v2/account/funding-assets
+Request Example
+curl "https://api.bitget.com/api/v2/account/funding-assets" \
+  -H "ACCESS-KEY:your apiKey" \
+  -H "ACCESS-SIGN:*******" \
+  -H "ACCESS-PASSPHRASE:*****" \
+  -H "ACCESS-TIMESTAMP:1659076670000" \
+  -H "locale:en-US" \
+  -H "Content-Type: application/json"
+
+Request Parameters
+Parameter	Type	Required	Description
+coin	String	No	default all coin
+Response Example
+{
+  "code": "00000",
+  "msg": "success",
+  "requestTime": 1712129301188,
+  "data": [
+    {
+      "coin": "USDT",
+      "available": "326",
+      "frozen": "",
+      "usdtValue": "326"
+    }
+  ]
+}
+
+Response parameters
+Parameter	Type	Description
+data	List<Object>	assets List
+> coin	String	coin
+> available	String	available
+> frozen	String	forzen
+> usdtValue	String	USDT value
+ Get Single Account
+Frequency limit: 10 times/1s (uid)
+
+Description
+Get account details with the given 'marginCoin' and 'productType'
+
+HTTP Request
+GET /api/v2/mix/account/account
+Request Example
+curl "https://api.bitget.com/api/v2/mix/account/account?symbol=btcusdt&productType=USDT-FUTURES&marginCoin=usdt" \
+   -H "ACCESS-KEY:*******" \
+   -H "ACCESS-SIGN:*" \
+   -H "ACCESS-PASSPHRASE:*" \
+   -H "ACCESS-TIMESTAMP:1659076670000" \
+   -H "locale:en-US" \
+   -H "Content-Type: application/json" 
+
+
+Request Parameters
+Parameter	Type	Required	Description
+symbol	String	Yes	Trading pair
+productType	String	Yes	Product type
+USDT-FUTURES USDT-M Futures
+COIN-FUTURES Coin-M Futures
+USDC-FUTURES USDC-M Futures
+marginCoin	String	Yes	Margin coin
+Response Example
+{
+  "code": "00000",
+  "data": {
+    "marginCoin": "USDT",
+    "locked": "0",
+    "available": "13168.86110692",
+    "crossedMaxAvailable": "13168.86110692",
+    "isolatedMaxAvailable": "13168.86110692",
+    "maxTransferOut": "13168.86110692",
+    "accountEquity": "13178.86110692",
+    "usdtEquity": "13178.861106922",
+    "btcEquity": "0.344746495477",
+    "crossedRiskRate": "0",
+    "crossedMarginLeverage": "20",
+    "isolatedLongLever": "20",
+    "isolatedShortLever": "20",
+    "marginMode": "crossed",
+    "posMode": "hedge_mode",
+    "unrealizedPL": "",
+    "coupon": "0",
+    "crossedUnrealizedPL":"23",
+    "isolatedUnrealizedPL":"0",
+    "assetMode": "union"
+  },
+  "msg": "success",
+  "requestTime": 1627292199523
+}
+
+Response Parameters
+Parameter	Type	Description
+>marginCoin	String	Margin coin
+>locked	String	Locked quantity (margin coin). Lockup will be triggered when there is a position to be closed.
+>available	String	Available quantity in the account
+>crossedMaxAvailable	String	Maximum available balance to open positions under the cross margin mode (margin coin)
+>isolatedMaxAvailable	String	Maximum available balance to open positions under the isolated margin mode (margin coin)
+>maxTransferOut	String	Maximum transferable amount
+>accountEquity	String	Account equity (margin coin), including unrealized PnL (based on mark price)
+>usdtEquity	String	Account equity in USDT
+>btcEquity	String	Account equity in BTC
+>crossedRiskRate	String	Risk ratio in cross margin mode
+>crossedMarginLeverage	String	Leverage in cross margin mode
+>isolatedLongLever	String	Leverage of long positions in isolated margin mode
+>isolatedShortLever	String	Leverage of short positions in isolated margin mode
+>marginMode	String	Margin mode.
+isolated – isolated margin mode;
+crossed – cross margin mode
+>posMode	String	Position mode
+one_way_mode: one-way mode
+hedge_mode: hedge mode
+>unrealizedPL	String	Unrealized PnL
+>coupon	String	Trading bonus
+>crossedUnrealizedPL	String	unrealizedPL for croessed
+>isolatedUnrealizedPL	String	unrealizedPL for isolated
+>assetMode	String	Assets mode
+union Multi-assets mode
+single Single-assets mode
+
+Get All Positions
+Rate limit: 5 requests/sec/UID
+
+Description
+Returns information about all current positions with the given productType
+
+HTTP Request
+GET /api/v2/mix/position/all-position
+Request Example
+curl "https://api.bitget.com/api/v2/mix/position/all-position?productType=USDT-FUTURES&marginCoin=USDT" \
+   -H "ACCESS-KEY:*******" \
+   -H "ACCESS-SIGN:*" \
+   -H "ACCESS-PASSPHRASE:*" \
+   -H "ACCESS-TIMESTAMP:1659076670000" \
+   -H "locale:en-US" \
+   -H "Content-Type: application/json" 
+
+
+Request Parameters
+Parameter	Type	Required	Description
+productType	String	Yes	Product type
+USDT-FUTURES USDT-M Futures
+COIN-FUTURES Coin-M Futures
+USDC-FUTURES USDC-M Futures
+marginCoin	String	No	Margin coin, capitalized. e.g. USDT
+Response Example
+{
+    "code": "00000",
+    "msg": "success",
+    "requestTime": 21312312312321,
+    "data": [
+        {
+            "marginCoin": "USDT",
+            "symbol": "BTCUSDT",
+            "holdSide": "long",
+            "openDelegateSize": "0.01",
+            "marginSize": "9.6695050093373343",
+            "available": "0.01",
+            "locked": "0.09",
+            "total": "0.01",
+            "leverage": "20",
+            "achievedProfits": "0",
+            "openPriceAvg": "25000",
+            "marginMode": "isolated",
+            "posMode": "hedge_mode",
+            "unrealizedPL": "1",
+            "liquidationPrice": "24144.1124161806977798",
+            "keepMarginRate": "0.004",
+            "markPrice": "25100",
+            "breakEvenPrice": "24778.97",
+            "totalFee": "1.45",
+            "deductedFee": "0.388",
+            "takeProfit": "3",
+            "stopLoss": "2",
+            "takeProfitId": "11111111",
+            "stopLossId": "11111111",
+            "marginRatio": "0.1082149545822005",
+            "assetMode":"single",
+            "cTime": "1691382137448",
+            "uTime": "1691382137999"
+        }
+    ]
+}
+
+Response Parameters
+Parameter	Type	Description
+>symbol	String	Trading pair name
+>marginCoin	String	Margin coin
+>holdSide	String	Position direction
+long: long position
+short: short position
+>openDelegateSize	String	Amount to be filled of the current order (base coin)
+>marginSize	String	Margin amount (margin coin)
+>available	String	Available amount for positions (base currency)
+>locked	String	Frozen amount in the position (base currency)
+>total	String	Total amount of all positions (available amount + locked amount)
+>leverage	String	Leverage
+>achievedProfits	String	Realized PnL(exclude the funding fee and transaction fee)
+>openPriceAvg	String	Average entry price
+>marginMode	String	Margin mode
+isolated: isolated margin
+crossed: cross margin
+>posMode	String	Position mode
+one_way_mode positions in one-way mode
+hedge_mode positions in hedge-mode
+>unrealizedPL	String	Unrealized PnL
+>liquidationPrice	String	Estimated liquidation price
+If the value <= 0, it means the position is at low risk and there is no liquidation price at this time
+>keepMarginRate	String	Tiered maintenance margin rate
+>markPrice	String	Mark price
+>marginRatio	String	Maintenance margin rate (MMR), 0.1 represents 10%
+>breakEvenPrice	String	Position breakeven price
+>totalFee	String	Funding fee, the accumulated value of funding fee during the position,The initial value is empty, indicating that no funding fee has been charged yet.
+>takeProfit	String	Take profit price
+>stopLoss	String	Stop loss price
+>takeProfitId	String	Take profit order ID
+>stopLossId	String	Stop loss order ID
+>deductedFee	String	Deducted transaction fees: transaction fees deducted during the position
+>cTime	String	Creation time, timestamp, milliseconds
+The set is in descending order from the latest time.
+>assetMode	String	single : single asset mode
+union multi-Assets mode
+>uTime	String	Last updated time, timestamp, milliseconds
+
+Get Historical Position
+20times/S （uid）
+
+Description
+Check position history (Only check the data within 3 months)
+
+HTTP Request
+GET /api/v2/mix/position/history-position
+Request
+curl "https://api.bitget.com/api/v2/mix/position/history-position?productType=USDT-FUTURES" \
+   -H "ACCESS-KEY:*******" \
+   -H "ACCESS-SIGN:*" \
+   -H "ACCESS-PASSPHRASE:*" \
+   -H "ACCESS-TIMESTAMP:1659076670000" \
+   -H "locale:en-US" \
+   -H "Content-Type: application/json" 
+
+Request Parameter
+Parameter	Type	Required	Description
+symbol	String	No	Trading pair
+productType	String	No	Product type, default:USDT-FUTURES, if symbol parameter reuqest, then this parameter will not take effect
+USDT-FUTURES USDT-M Futures
+COIN-FUTURES Coin-M Futures
+USDC-FUTURES USDC-M Futures
+idLessThan	String	No	Requests the content on the page before this ID (older data), the value input should be the endId of the corresponding interface.
+startTime	String	No	Start time(timestamp in milliseconds)
+timestampis Unix time in milliseconds，for example 1597026383085
+（Wildest time range is 3 months，if this field is empty then the default time range is 3 months.）
+endTime	String	No	Start time (timestamp in milliseconds)
+timestampis Unix time in milliseconds，for example 1597026383085
+（Wildest time range is 3 months，if this field is empty then the default time range is 3 months.）
+limit	String	No	Default 20 Max 100
+Response
+{
+    "code": "00000",
+    "msg": "success",
+    "requestTime": 1312312312321,
+    "data": {
+        "list":[{
+            "positionId": "xxxxxxxxxxx",
+            "marginCoin": "USDT",
+            "symbol": "BTCUSDT",
+            "holdSide": "long",
+            "openAvgPrice": "32000",
+            "closeAvgPrice": "32500",
+            "marginMode": "isolated",
+            "openTotalPos": "0.01",
+            "closeTotalPos": "0.01",
+            "pnl": "14.1",
+            "netProfit": "12.1",
+            "totalFunding": "0.1",
+            "openFee": "0.01",
+            "closeFee": "0.01",
+            "posMode": "one_way_mode",
+            "cTime": "1988824171000",
+            "uTime": "1988824171000"
+        }],
+        "endId":"23423432423423234"
+    }
+}
+
+Response Parameter
+Parameter	Type	Description
+list	Array	Historical Position Data
+>positionId	String	History position ID
+>symbol	String	Trading pair
+>marginCoin	String	Margin coin
+>holdSide	String	Position direction
+long: long position
+short: short position
+>posMode	String	Position mode
+one_way_mode: positions in one-way mode
+hedge_mode: positions in hedge-mode
+>openAvgPrice	String	Average price of opening position
+>closeAvgPrice	String	Average price of closing position
+>marginMode	String	Margin Mode
+isolated: Isolated margin
+crossed: Cross margin
+>openTotalPos	String	Accumulated amount of long positions
+>closeTotalPos	String	Accumulated amount of short positions
+>pnl	String	realized profit and loss
+>netProfit	String	net profit
+>totalFunding	String	Accumulated funding costs
+>openFee	String	Total handling fee for position opening
+>closeFee	String	Total handling fee for position closing
+>uTime	String	Last update time Timestamp milliseconds
+>cTime	String	Create time Timestamp milliseconds
+endId	String	ID of the last data。id value is tracking No and use it to check based on idLessThan
+
+mira a ver si el funding fee es esto 
+
+Get USDT-M futures Interest history
+Frequency limit： 5 times/s (UID)
+
+Description
+Get USDT-M futures Interest history
+
+HTTP Request
+GET /api/v2/mix/account/interest-history
+Request Example
+curl "https://api.bitget.com/api/v2/mix/account/interest-history?productType=usdt-futures&startTime=1725330167000&endTime=1725848567893" \
+  -H "ACCESS-KEY:your apiKey" \
+  -H "ACCESS-SIGN:*" \
+  -H "ACCESS-PASSPHRASE:*" \
+  -H "ACCESS-TIMESTAMP:1659076670000" \
+  -H "locale:zh-CN" \
+  -H "Content-Type: application/json"
+
+
+Request Parameters
+Parameter	Type	Required	Description
+coin	String	No	coin
+productType	String	Yes	Product type
+USDT-FUTURES USDT professional futures
+idLessThan	String	No	Requests the content on the page before this ID (older data), the value input should be the endId of the corresponding interface.
+startTime	String	No	Start timestamp
+Unix timestamp in milliseconds format, e.g. 1597026383085
+endTime	String	No	End timestamp
+Unix timestamp in milliseconds format, e.g. 1597026383085
+limit	String	No	Number of queries: Default: 20, maximum: 100
+Response Example
+{
+    "code": "00000",
+    "msg": "success",
+    "requestTime": 1725875190690,
+    "data": {
+        "nextSettleTime": "1725876300000",
+        "borrowAmount": "0",
+        "borrowLimit": "600000",
+        "interestList": [
+            {
+                "coin": "USDT",
+                "liability": "100",
+                "interestFreeLimit": "100",
+                "interestLimit": "500",
+                "hourInterestRate": "0.12",
+                "interest": "0.12",
+                "cTime": "1725848567893"
+            } 
+        ],
+        "endId": "xxxxxxxxxxxxxxx"
+    }
+}
+
+Response Parameters
+Parameter	Type	Description
+nextSettleTime	String	Next interest payment time
+borrowAmount	String	Current USDT-M Futures debt
+borrowLimit	String	Loan limit
+interestList	List<Object>	interest data
+>coin	String	Coin
+>liability	String	Total debt
+>interestFreeLimit	String	Interest-free amount
+>interestLimit	String	Interest-accruing amount
+>hourInterestRate	String	Hourly interest rate
+>interset	String	interset
+>cTime	String	create time
+endId	String	This is used when 'idLessThan' is set as a range.  Te he pasado informacion para ver el funding assets y spot, pero puedes juntar los dos para que se vea en spot en la app, en valor USDT claro. 
