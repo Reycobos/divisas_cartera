@@ -1,1 +1,35 @@
- 
+ # === CARPETAS QUE NO QUIERES SUBIR ===
+funcionan/
+tests/
+debug/
+paradex_raw_dumps/
+
+# === ARCHIVOS DE CONFIGURACIÓN SENSIBLES ===
+.env
+*.db
+portfolio.db
+
+# === PYTHON CACHE ===
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# === SPYDER ===
+.spyproject/
+.spyderproject
+
+# === ARCHIVOS TEMPORALES ===
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# === ARCHIVOS ESPECÍFICOS ===
+borrar.py
+changeDB.py
+api_manual_import.py
+ourbit_manual.py
+parcheformatoslbank.py
