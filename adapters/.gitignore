@@ -1,0 +1,23 @@
+# Cache de Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos sensibles
+.env
+*.db
+portfolio.db
+
+# Carpetas de archivos viejos
+archivos viejos. Borrar en noviembre/
+tmp/
+
+# Archivos temporales
+*.log
+*.tmp
+lbank_pairs.txt
+raw.jsonl
+scriptformatoslbank.py
+lbank_pairs.py
+lbank_sdk_complete.py
+lbnkadebugbalances.py
