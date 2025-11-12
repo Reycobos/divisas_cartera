@@ -1,0 +1,29 @@
+{
+  "status": "OK",
+  "data": [
+    {
+      "id": 1987135261833691136,
+      "accountId": 102896,
+      "market": "MON-USD",
+      "status": "OPENED",
+      "side": "LONG",
+      "leverage": "3",
+      "size": "74000",
+      "value": "4604.689991",
+      "openPrice": "0.06025",
+      "markPrice": "0.062225540419",
+      "liquidationPrice": "0",
+      "margin": "230.234499",
+      "unrealisedPnl": "145.454091",
+      "midPriceUnrealisedPnl": "140.230000",
+      "realisedPnl": "2.407894",
+      "tpTriggerPrice": "0.111",
+      "tpLimitPrice": "0.11016",
+      "slTriggerPrice": "0.0524",
+      "slLimitPrice": "0.052",
+      "adl": 2,
+      "createdAt": 1762604940272,
+      "updatedAt": 1762610523107
+    }
+  ]
+}

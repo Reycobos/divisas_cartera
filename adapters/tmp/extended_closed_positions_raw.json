@@ -1,0 +1,172 @@
+{
+  "rows": [
+    {
+      "id": 1982081320548827136,
+      "accountId": 102896,
+      "market": "KAITO-USD",
+      "side": "LONG",
+      "size": "2615.0000000000000000",
+      "maxPositionSize": "14338.0000000000000000",
+      "leverage": "6.0000000000000000",
+      "openPrice": "1.1762000000000000",
+      "exitPrice": "1.1811000000000000",
+      "realisedPnl": "236.2823280000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "70.0367000000000000",
+        "fundingFees": "170.9710280000000000",
+        "openFees": "-1.1113300000000000",
+        "closeFees": "-3.6140700000000000"
+      },
+      "createdTime": 1761399986766,
+      "exitType": "TRADE",
+      "closedTime": 1761436447286
+    },
+    {
+      "id": 1971284373588148224,
+      "accountId": 102896,
+      "market": "XPL-USD",
+      "side": "SHORT",
+      "size": "10060.0000000000000000",
+      "maxPositionSize": "10060.0000000000000000",
+      "leverage": "2.0000000000000000",
+      "openPrice": "1.1184300000000000",
+      "exitPrice": "1.5081600000000000",
+      "realisedPnl": "-3821.5044350000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "-3920.5923000000000000",
+        "fundingFees": "105.0331690000000000",
+        "openFees": "-2.5315840000000000",
+        "closeFees": "-3.4137200000000000"
+      },
+      "createdTime": 1758825794013,
+      "exitType": "TRADE",
+      "closedTime": 1759048125762
+    },
+    {
+      "id": 1970578966485925888,
+      "accountId": 102896,
+      "market": "AVNT-USD",
+      "side": "SHORT",
+      "size": "203.0000000000000000",
+      "maxPositionSize": "203.0000000000000000",
+      "leverage": "10.0000000000000000",
+      "openPrice": "1.9555000000000000",
+      "exitPrice": "1.9582000000000000",
+      "realisedPnl": "-0.7160580000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "-0.5373000000000000",
+        "fundingFees": "0.0000000000000000",
+        "openFees": "-0.0893180000000000",
+        "closeFees": "-0.0894400000000000"
+      },
+      "createdTime": 1758657611854,
+      "exitType": "TRADE",
+      "closedTime": 1758657708986
+    },
+    {
+      "id": 1969716189252812800,
+      "accountId": 102896,
+      "market": "XPL-USD",
+      "side": "SHORT",
+      "size": "23000.0000000000000000",
+      "maxPositionSize": "23000.0000000000000000",
+      "leverage": "2.0000000000000000",
+      "openPrice": "0.7419600000000000",
+      "exitPrice": "1.0705900000000000",
+      "realisedPnl": "-7226.1673420000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "-7558.4900000000000000",
+        "fundingFees": "341.7026040000000000",
+        "openFees": "-3.8396430000000000",
+        "closeFees": "-5.5403030000000000"
+      },
+      "createdTime": 1758451909732,
+      "exitType": "TRADE",
+      "closedTime": 1758819022514
+    },
+    {
+      "id": 1969688448985989120,
+      "accountId": 102896,
+      "market": "ASTER-USD",
+      "side": "LONG",
+      "size": "24.0000000000000000",
+      "maxPositionSize": "5524.0000000000000000",
+      "leverage": "5.0000000000000000",
+      "openPrice": "1.8150000000000000",
+      "exitPrice": "2.1826500000000000",
+      "realisedPnl": "1915.3211290000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "2030.9178200000000000",
+        "fundingFees": "-114.0273220000000000",
+        "openFees": "0.0000000000000000",
+        "closeFees": "-1.5693690000000000"
+      },
+      "createdTime": 1758445295937,
+      "exitType": "TRADE",
+      "closedTime": 1758795523602
+    },
+    {
+      "id": 1969297152366608384,
+      "accountId": 102896,
+      "market": "ASTER-USD",
+      "side": "LONG",
+      "size": "375.0000000000000000",
+      "maxPositionSize": "10576.0000000000000000",
+      "leverage": "5.0000000000000000",
+      "openPrice": "0.9436600000000000",
+      "exitPrice": "1.4148500000000000",
+      "realisedPnl": "4971.9592510000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "4983.3525300000000000",
+        "fundingFees": "-6.9019330000000000",
+        "openFees": "-1.1245620000000000",
+        "closeFees": "-3.3667840000000000"
+      },
+      "createdTime": 1758352003553,
+      "exitType": "TRADE",
+      "closedTime": 1758389879563
+    },
+    {
+      "id": 1968652670864457728,
+      "accountId": 102896,
+      "market": "KAITO-USD",
+      "side": "LONG",
+      "size": "8633.0000000000000000",
+      "maxPositionSize": "8633.0000000000000000",
+      "leverage": "5.0000000000000000",
+      "openPrice": "1.1585000000000000",
+      "exitPrice": "1.1476000000000000",
+      "realisedPnl": "-54.4883410000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "-94.4635000000000000",
+        "fundingFees": "44.3426170000000000",
+        "openFees": "-2.1383320000000000",
+        "closeFees": "-2.2291260000000000"
+      },
+      "createdTime": 1758198347189,
+      "exitType": "TRADE",
+      "closedTime": 1758265016378
+    },
+    {
+      "id": 1966857088600637440,
+      "accountId": 102896,
+      "market": "XPL-USD",
+      "side": "SHORT",
+      "size": "29000.0000000000000000",
+      "maxPositionSize": "29000.0000000000000000",
+      "leverage": "2.0000000000000000",
+      "openPrice": "0.6856100000000000",
+      "exitPrice": "0.6804200000000000",
+      "realisedPnl": "712.2652610000000000",
+      "realisedPnlBreakdown": {
+        "tradePnl": "150.5100000000000000",
+        "fundingFees": "570.6686060000000000",
+        "openFees": "-4.4736050000000000",
+        "closeFees": "-4.4397400000000000"
+      },
+      "createdTime": 1757770247017,
+      "exitType": "TRADE",
+      "closedTime": 1758347845027
+    }
+  ]
+}
