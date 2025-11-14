@@ -35,7 +35,8 @@ from universal_cache import (
     add_manual_pair,
     update_sync_timestamp,
     get_last_sync_timestamp,
-    detect_closed_positions
+    detect_closed_positions,
+    get_cached_symbols
 )
 
 
@@ -80,6 +81,11 @@ def smart_sync_closed_positions(exchange_name: str,
     
     # 2. Detectar cambios (posiciones cerradas)
     disappeared_symbols = detect_closed_positions(exchange_name, current_positions)
+    # ✅ DEBUG
+    print(f"🔍 {exchange_name}:")
+    print(f"   📦 Posiciones actuales: {[p.get('symbol') for p in current_positions]}")
+    print(f"   🗄️  Cache tiene: {get_cached_symbols(exchange_name)}")  # Nueva función helper
+    print(f"   🎯 Detectadas cerradas: {disappeared_symbols}")
     
     # 3. Calcular ventana temporal
     last_sync_ms = get_last_sync_timestamp(exchange_name)
@@ -553,7 +559,7 @@ from adapters.paradexv9s import (
       save_paradex_closed_positions,
 )
 
-from adapters.hyperliquidv4s import (
+from adapters.hyperliquidv5 import (
     fetch_hyperliquid_open_positions,
     fetch_hyperliquid_funding_fees,
     fetch_hyperliquid_all_balances,
@@ -1567,26 +1573,22 @@ def main():
     # Inicializar cache universal
     init_universal_cache_db()
 
-    # ---------- Helper: actualizar cache de un exchange ----------
-    def update_exchange_cache(exchange_name, fetch_positions_func):
-        try:
-            print(f"🔄 Actualizando cache para {exchange_name}.")
-            positions = fetch_positions_func()
-            update_cache_from_positions(exchange_name, positions)
-        except Exception as e:
-            print(f"⚠️ Error actualizando cache de {exchange_name}: {e}")
-
-    # ---------- Cache “rápido” para gate / binance (igual que ahora) ----------
-    # if should_sync("gate"):
-    #     update_exchange_cache("gate", lambda: fetch_gate_open_positions(settle="usdt"))
-
-    # if should_sync("bitget"):
-    #     update_exchange_cache("bitget", fetch_bitget_open_positions())
-
-    # Mostrar estadísticas de cache
+    # ✅ Actualizar cache para TODOS los exchanges que tengan posiciones abiertas
+    print("🔄 Actualizando cache universal para todos los exchanges...")
+    
+    for ex_name, fetch_positions_func in POSITIONS_FUNCTIONS.items():
+        if should_sync(ex_name):
+            try:
+                print(f"   📦 {ex_name.capitalize()}: obteniendo posiciones...")
+                positions = fetch_positions_func()
+                update_cache_from_positions(ex_name, positions)
+                print(f"   ✅ {ex_name.capitalize()}: {len(positions)} posiciones en cache")
+            except Exception as e:
+                print(f"   ⚠️ {ex_name.capitalize()}: error - {e}")
+    
+    # Mostrar estadísticas del cache
     stats = get_cache_stats()
     print(f"📊 Cache universal: {stats['total_entries']} símbolos (TTL: {UNIVERSAL_CACHE_TTL_DAYS} días)")
-
     # =====================================================
     # 🧠 SMART SYNC - Alternativa 3
     #   1) Forzar una vez Bitget (full sync corto)

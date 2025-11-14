@@ -10,6 +10,17 @@ DB_PATH = "portfolio.db"
 # TOGGLE CONFIGURABLE - Días de retención del cache
 CACHE_TTL_DAYS = 7  # Puedes cambiar este valor según necesites
 
+import re
+
+def _base_symbol(sym: str) -> str:
+    """
+    Normaliza símbolos: BTCUSDT -> BTC, BTC-PERP -> BTC
+    """
+    s = (sym or "").upper()
+    s = re.sub(r'[-_/]?(USDT|USDC|USD)$', '', s)
+    s = re.sub(r'[-_/]?PERP$', '', s)
+    return s
+
 def init_universal_cache_db():
     """Inicializa la base de datos para el cache universal"""
     conn = sqlite3.connect(DB_PATH)
@@ -320,8 +331,16 @@ def detect_closed_positions(exchange: str, current_positions: List[Dict[str, Any
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     
-    # Símbolos actuales
-    current_symbols = set(p.get("symbol", "") for p in current_positions if p.get("symbol"))
+    # # Símbolos actuales
+    # current_symbols = set(p.get("symbol", "") for p in current_positions if p.get("symbol"))
+    
+    #nuevo para solucionar problema de detection, normalizar simbolos.
+    current_symbols = set()
+    for pos in current_positions:
+        symbol = (pos.get("symbol") or "").upper()
+        # Normalizar según tu helper _base_symbol
+        normalized = _base_symbol(symbol)  # ← Asegúrate de usar el mismo helper
+        current_symbols.add(normalized)
     
     # Símbolos en caché del exchange
     cur.execute("""
@@ -363,3 +382,16 @@ if __name__ == "__main__":
     print(f"📦 Cache Gate.io: {len(gate_pairs)} pairs")
     for pair in gate_pairs:
         print(f"   - {pair}")
+
+# debug para ver simbolos        
+def get_cached_symbols(exchange: str) -> set:
+    """Devuelve símbolos en cache para un exchange."""
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT symbol FROM universal_cache 
+        WHERE exchange = ? AND last_seen > ?
+    """, (exchange.lower(), int(time.time()) - (CACHE_TTL_DAYS * 86400)))
+    symbols = {row[0] for row in cur.fetchall()}
+    conn.close()
+    return symbols
