@@ -642,7 +642,13 @@
                 class="closed-kpis d-flex align-items-center gap-3"
               ></div>
             </div>
-            <button id="refreshClosed" class="refresh-btn">🔄 Refresh</button>
+            <div class="d-flex align-items-center gap-2">
+              <button id="refreshClosed" class="refresh-btn">🔄 Refresh</button>
+              <button id="loadClosed" class="btn btn-success">
+                ▶ Load (cache)
+              </button>
+              <span id="loadClosedStatus" class="text-white-50"></span>
+            </div>
           </div>
 
           <!-- Filtros -->
@@ -680,6 +686,7 @@
                   <option value="SHORT">Short</option>
                   <option value="SPOTBUY">Spot Buy</option>
                   <option value="SWAPSTABLE">Swap Stable</option>
+                  <option value="SPOTSELL">Spot Sell</option>
                 </select>
               </div>
               <div class="col-md-3">
@@ -955,6 +962,49 @@
             </div>
           </div>
         </div>
+        <div class="card p-3 mt-3">
+          <h4 class="mb-3">Load closed positions (force)</h4>
+          <div class="row g-3">
+            <div class="col-md-3">
+              <label class="form-label">Exchange</label>
+              <select id="force-exchange" class="form-select dark-input">
+                <option value="binance">Binance</option>
+                <option value="bybit">Bybit</option>
+                <option value="gate">Gate</option>
+                <option value="okx">OKX</option>
+                <option value="kucoin">KuCoin</option>
+                <option value="bitget">Bitget</option>
+                <option value="mexc">MEXC</option>
+                <option value="whitebit">WhiteBIT</option>
+                <option value="xt">XT</option>
+                <option value="htx">HTX</option>
+                <option value="extended">Extended</option>
+              </select>
+            </div>
+
+            <div class="col-md-3">
+              <label class="form-label">Days back (1–60)</label>
+              <input
+                type="number"
+                id="force-days"
+                class="form-control dark-input"
+                min="1"
+                max="60"
+                value="30"
+              />
+            </div>
+
+            <div class="col-md-3 d-flex align-items-end">
+              <button id="btn-force-closed" class="btn btn-warning w-100">
+                Load closed positions
+              </button>
+            </div>
+
+            <div class="col-md-3 d-flex align-items-end">
+              <span id="force-status" class="text-white-50"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1011,6 +1061,140 @@
             <button type="button" class="btn btn-primary" id="save-size-btn">
               Save Changes
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Modal para boton de manuales en abiertas -->
+    <div class="modal" id="modalManualOpen" tabindex="-1">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-white">
+          <div class="modal-header">
+            <h5 class="modal-title">Add manual open position</h5>
+            <button
+              type="button"
+              class="btn-close btn-close-white"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <form id="formManualOpen" class="row g-3">
+              <div class="col-md-4">
+                <label class="form-label">Exchange</label>
+                <select name="exchange" class="form-select">
+                  <option>Arbitrum</option>
+                  <option>Base OKX</option>
+                  <option>BNB OKX</option>
+                  <option>Ethereum OKX</option>
+                  <option>Ourbit</option>
+                  <option>Solana JUP</option>
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Symbol</label>
+                <input
+                  name="symbol"
+                  class="form-control"
+                  placeholder="e.g. BTC"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Side</label>
+                <select name="side" class="form-select">
+                  <option value="long">long</option>
+                  <option value="short">short</option>
+                  <option value="spotbuy">spotbuy</option>
+                  <option value="spotsell">spotsell</option>
+                </select>
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Size</label>
+                <input
+                  name="size"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Entry price</label>
+                <input
+                  name="entry_price"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Open time (epoch s)</label>
+                <input name="open_time" type="number" class="form-control" />
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Leverage</label>
+                <input
+                  name="leverage"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Liquidation price</label>
+                <input
+                  name="liquidation_price"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+
+              <div class="col-md-4">
+                <label class="form-label">Initial margin</label>
+                <input
+                  name="initial_margin"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Notional</label>
+                <input
+                  name="notional"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Fee total</label>
+                <input
+                  name="fee_total"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+              <div class="col-md-4">
+                <label class="form-label">Funding total</label>
+                <input
+                  name="funding_total"
+                  type="number"
+                  step="any"
+                  class="form-control"
+                />
+              </div>
+            </form>
+            <div id="manualOpenMsg" class="small text-info mt-2"></div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" data-bs-dismiss="modal">
+              Cancel
+            </button>
+            <button id="btnManualOpenSave" class="btn btn-success">Save</button>
           </div>
         </div>
       </div>
@@ -1651,6 +1835,16 @@
         .then((data) => {
           const container = document.getElementById("positions-container");
           container.innerHTML = "";
+          // Header / Toolbar de OPEN POSITIONS
+          container.innerHTML = `
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h4 class="mb-0">Open Positions</h4>
+              <div class="d-flex align-items-center gap-2">
+                <button id="btnAddManualOpen" class="btn btn-primary">➕ Add manual (open)</button>
+              </div>
+            </div>
+            <div id="openToolbarStatus" class="text-white-50 mb-2"></div>
+          `;
           const rows = Array.isArray(data?.positions) ? data.positions : [];
 
           // Limpiar cache de posiciones cerradas
@@ -1680,7 +1874,7 @@
               d2: sumFundingForDay(baseSym, d2),
             };
 
-            // ⬇️ A partir de aquí pega tal cual tu código de render (lo dejo íntegro)
+            //
             let card = `
             <div class="strategy-card">
             <div class="strategy-header">
@@ -1768,67 +1962,80 @@
               const closedPct =
                 initSize > 0 ? (100 * closedSize) / initSize : null;
 
+              const isManual = p?._source === "manual" || !!p?.manual_id;
+              const manualId = p?.manual_id || "";
+
               card += `
-              <tr>
-                <td>${p?.exchange || ""}</td>
-                <td>${cleanSymbol(p?.symbol)}</td>
-                <td><span class="badge ${
-                  side === "long"
-                    ? "badge-long"
-                    : side === "short"
-                    ? "badge-short"
-                    : "bg-secondary"
-                }">${sideLabel}</span></td>
-                <td>${fmt(displaySize, 2)}</td>
-                <td>${fmt(entry)}</td>
-                <td>${fmt(mark)}</td>
-                <td>${fmt(liq)}</td>
-                <td>${
-                  incToLiqPct === null
-                    ? "-"
-                    : `<span class="risk-pill ${riskClass(
-                        incToLiqPct
-                      )}">${incToLiqPct.toFixed(1)}%</span>`
-                }</td>
-                <td>${
-                  closedPct === null ? "-" : closedPct.toFixed(1) + "%"
-                }</td>
-                <td>$${fmt(notional, 2)}</td>
-                <td>${
-                  (p?.funding_rate ?? "") === ""
-                    ? "-"
-                    : (Number(p.funding_rate) * 100).toFixed(4) + "%"
-                }</td>
-                <td>${
-                  p?.funding_interval_hours ?? p?.funding_interval_h ?? "-"
-                }</td>
-                <td class="${
-                  (Number(p?.unrealized_pnl) || 0) >= 0
-                    ? "pnl-positive"
-                    : "pnl-negative"
-                }">$${fmt(p?.unrealized_pnl, 2)}</td>
-                <td class="${
-                  (Number(p?.fee) || 0) >= 0 ? "pnl-positive" : "pnl-negative"
-                }">$${fmt(p?.fee, 2)}</td>
-                <td class="${
-                  (Number(p?.funding_fee) || 0) >= 0
-                    ? "pnl-positive"
-                    : "pnl-negative"
-                }">$${fmt(p?.funding_fee, 2)}</td>
-                <td class="${
-                  (Number(p?.realized_pnl) || 0) >= 0
-                    ? "pnl-positive"
-                    : "pnl-negative"
-                }">$${fmt(p?.realized_pnl, 2)}</td>
-                <td>
-                  <button class="btn btn-sm btn-outline-warning edit-size-btn" 
-                          data-exchange="${p?.exchange || ""}" 
-                          data-symbol="${p?.symbol || ""}" 
-                          data-current-size="${fmt(displaySize, 2)}">
-                    ✏️ Edit Size
-                  </button>
-                </td>
-              </tr>`;
+                <tr>
+                  <td>${p?.exchange || ""}</td>
+                  <td>${cleanSymbol(p?.symbol)}</td>
+                  <td><span class="badge ${
+                    side === "long"
+                      ? "badge-long"
+                      : side === "short"
+                      ? "badge-short"
+                      : "bg-secondary"
+                  }">${sideLabel}</span></td>
+                  <td>${fmt(displaySize, 2)}</td>
+                  <td>${fmt(entry)}</td>
+                  <td>${fmt(mark)}</td>
+                  <td>${fmt(liq)}</td>
+                  <td>${
+                    incToLiqPct === null
+                      ? "-"
+                      : `<span class="risk-pill ${riskClass(
+                          incToLiqPct
+                        )}">${incToLiqPct.toFixed(1)}%</span>`
+                  }</td>
+                  <td>${
+                    closedPct === null ? "-" : closedPct.toFixed(1) + "%"
+                  }</td>
+                  <td>$${fmt(notional, 2)}</td>
+                  <td>${
+                    (p?.funding_rate ?? "") === ""
+                      ? "-"
+                      : (Number(p.funding_rate) * 100).toFixed(4) + "%"
+                  }</td>
+                  <td>${
+                    p?.funding_interval_hours ?? p?.funding_interval_h ?? "-"
+                  }</td>
+                  <td class="${
+                    (Number(p?.unrealized_pnl) || 0) >= 0
+                      ? "pnl-positive"
+                      : "pnl-negative"
+                  }">$${fmt(p?.unrealized_pnl, 2)}</td>
+                  <td class="${
+                    (Number(p?.fee) || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+                  }">$${fmt(p?.fee, 2)}</td>
+                  <td class="${
+                    (Number(p?.funding_fee) || 0) >= 0
+                      ? "pnl-positive"
+                      : "pnl-negative"
+                  }">$${fmt(p?.funding_fee, 2)}</td>
+                  <td class="${
+                    (Number(p?.realized_pnl) || 0) >= 0
+                      ? "pnl-positive"
+                      : "pnl-negative"
+                  }">$${fmt(p?.realized_pnl, 2)}</td>
+                  <td>
+                    <div class="d-flex gap-2">
+                      <button class="btn btn-sm btn-outline-warning edit-size-btn"
+                              data-exchange="${p?.exchange || ""}"
+                              data-symbol="${p?.symbol || ""}"
+                              data-current-size="${fmt(displaySize, 2)}">
+                        ✏️ Edit Size
+                      </button>
+                      ${
+                        isManual
+                          ? `
+                        <button class="btn btn-sm btn-outline-danger" data-action="del" data-id="${manualId}">Delete</button>
+                        <button class="btn btn-sm btn-outline-success" data-action="send" data-id="${manualId}">Send to closed</button>
+                      `
+                          : ``
+                      }
+                    </div>
+                  </td>
+                </tr>`;
             });
 
             card += `</tbody></table>
@@ -1929,6 +2136,116 @@
           // Actualizar UI inmediatamente
           updatePositionSizeInUI(exchange, symbol, newSize);
         });
+
+      // ====== Manual Open (UI) ======
+      const addManualBtn = document.getElementById("btnAddManualOpen");
+      const modalManualOpen = new bootstrap.Modal(
+        document.getElementById("modalManualOpen")
+      );
+      const manualOpenMsg = document.getElementById("manualOpenMsg");
+
+      if (addManualBtn) {
+        addManualBtn.addEventListener("click", () => {
+          manualOpenMsg.textContent = "";
+          document.getElementById("formManualOpen").reset();
+          modalManualOpen.show();
+        });
+      }
+
+      document
+        .getElementById("btnManualOpenSave")
+        ?.addEventListener("click", async () => {
+          manualOpenMsg.textContent = "Saving…";
+          const fd = new FormData(document.getElementById("formManualOpen"));
+          const payload = Object.fromEntries(fd.entries());
+
+          try {
+            const res = await fetch("/api/open/manual/add", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || "Error");
+            manualOpenMsg.textContent = "✅ Saved";
+            modalManualOpen.hide();
+            // vuelve a cargar abiertas
+            try {
+              await (window.loadOpenPositions?.() ?? Promise.resolve());
+            } catch {}
+          } catch (e) {
+            manualOpenMsg.textContent = "❌ " + e.message;
+          }
+        });
+
+      // ====== Send to closed (UI) ======
+      const modalSendClosed = new bootstrap.Modal(
+        document.getElementById("modalSendClosed")
+      );
+      const sendClosedMsg = document.getElementById("sendClosedMsg");
+
+      document
+        .getElementById("btnSendClosedSave")
+        ?.addEventListener("click", async () => {
+          sendClosedMsg.textContent = "Sending…";
+          const fd = new FormData(document.getElementById("formSendClosed"));
+          const payload = Object.fromEntries(fd.entries());
+          payload.close_price = payload.close_price
+            ? Number(payload.close_price)
+            : null;
+          payload.pnl = payload.pnl ? Number(payload.pnl) : null;
+          payload.close_time = payload.close_time
+            ? Number(payload.close_time)
+            : null;
+
+          try {
+            const res = await fetch("/api/open/manual/close", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.error || "Error");
+            sendClosedMsg.textContent = "✅ Sent";
+            modalSendClosed.hide();
+            try {
+              await (window.loadOpenPositions?.() ?? Promise.resolve());
+            } catch {}
+            try {
+              await (window.loadClosedPositions?.() ?? Promise.resolve());
+            } catch {}
+          } catch (e) {
+            sendClosedMsg.textContent = "❌ " + e.message;
+          }
+        });
+
+      // ====== Botones por fila: Delete / Send to closed (delegación) ======
+      document.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button[data-action]");
+        if (!btn) return;
+        const action = btn.getAttribute("data-action");
+        const id = btn.getAttribute("data-id");
+        if (action === "del") {
+          if (!confirm("¿Delete manual open position?")) return;
+          const res = await fetch("/api/open/manual/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ manual_id: id }),
+          });
+          const data = await res.json();
+          if (data?.ok) {
+            try {
+              await (window.loadOpenPositions?.() ?? Promise.resolve());
+            } catch {}
+          } else {
+            alert("Delete failed");
+          }
+        } else if (action === "send") {
+          document.querySelector("#formSendClosed").reset();
+          document.querySelector("#formSendClosed [name=manual_id]").value = id;
+          modalSendClosed.show();
+        }
+      });
 
       // === FUNDING FEES CON PAGINACIÓN ===
 
@@ -2495,6 +2812,11 @@
                   Number(p.close_price) >= Number(p.entry_price)
                     ? "LONG"
                     : "SHORT";
+                // ✅ DN counting: SPOTBUY como LONG, SPOTSELL como SHORT
+                if (sideLabel === "LONG" || sideLabel === "SPOTBUY")
+                  longCount++;
+                if (sideLabel === "SHORT" || sideLabel === "SPOTSELL")
+                  shortCount++;
               }
               // Tratar SPOTBUY como LONG para delta neutral
               if (sideLabel === "LONG" || sideLabel === "SPOTBUY") longCount++;
@@ -2769,6 +3091,52 @@
         if (refreshClosed) {
           refreshClosed.addEventListener("click", loadClosedPositions);
         }
+        const loadClosedBtn = document.getElementById("loadClosed");
+        const loadClosedStatus = document.getElementById("loadClosedStatus");
+
+        if (loadClosedBtn) {
+          loadClosedBtn.addEventListener("click", async () => {
+            try {
+              loadClosedBtn.disabled = true;
+              loadClosedStatus.textContent = "⏳ Sincronizando (cache)…";
+
+              // Si has escrito algo en el filtro Exchange, lo usamos para sync selectivo
+              const exFilterEl = document.getElementById("filterExchange");
+              const ex = (exFilterEl?.value || "").trim().toLowerCase();
+
+              const res = await fetch("/api/closed/sync", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(ex ? { exchange: ex } : {}),
+              });
+
+              const data = await res.json();
+              if (!res.ok) throw new Error(data?.error || "Sync error");
+
+              // Construir mensaje corto
+              const total = data?.total_inserted ?? 0;
+              let msg = `✅ ${ex || "all"}: ${total} nuevas`;
+              if (data?.by_exchange && !ex) {
+                const top = Object.entries(data.by_exchange)
+                  .map(([k, v]) => `${k}:${v?.inserted ?? 0}`)
+                  .slice(0, 5)
+                  .join(" · ");
+                if (top) msg += ` | ${top}`;
+              }
+              loadClosedStatus.textContent = msg;
+
+              // Recargar la lista en pantalla
+              try {
+                await loadClosedPositions();
+              } catch (_) {}
+            } catch (e) {
+              loadClosedStatus.textContent = "❌ " + e.message;
+            } finally {
+              loadClosedBtn.disabled = false;
+              setTimeout(() => (loadClosedStatus.textContent = ""), 5000);
+            }
+          });
+        }
       });
 
       // También agregar un event listener para cuando se muestre la pestaña de Closed Positions
@@ -2898,6 +3266,53 @@
               try {
                 await loadClosedPositions();
               } catch (e) {}
+            } catch (e) {
+              st.textContent = "❌ " + e.message;
+            }
+          });
+        document
+          .getElementById("btn-force-closed")
+          ?.addEventListener("click", async () => {
+            const st = document.getElementById("force-status");
+            const exchange = document
+              .getElementById("force-exchange")
+              .value.trim();
+            const daysInput = parseInt(
+              document.getElementById("force-days").value,
+              10
+            );
+            const days = Math.min(
+              60,
+              Math.max(1, Number.isFinite(daysInput) ? daysInput : 30)
+            );
+
+            if (!exchange) {
+              st.textContent = "❌ Selecciona un exchange.";
+              return;
+            }
+
+            st.textContent = "⏳ Cargando cerradas…";
+            try {
+              // Endpoint backend sugerido: POST /api/closed/load
+              const res = await fetch("/api/closed/load", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ exchange, days }),
+              });
+              const data = await res.json();
+
+              if (!res.ok) throw new Error(data?.error || "Sync error");
+
+              // Mensaje estándar con recuentos si tu backend los devuelve
+              const ins = data?.inserted ?? data?.saved ?? 0;
+              const upd = data?.updated ?? 0;
+              const skp = data?.skipped ?? 0;
+              st.textContent = `✅ ${exchange}: nuevas=${ins} actualizadas=${upd} omitidas=${skp} (últimos ${days} días)`;
+
+              // refresca la pestaña de cerradas
+              try {
+                await loadClosedPositions();
+              } catch (_) {}
             } catch (e) {
               st.textContent = "❌ " + e.message;
             }

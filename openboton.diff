@@ -1,0 +1,155 @@
+*** a/portfolio.py
+--- b/portfolio.py
+@@
+ from dotenv import load_dotenv
+ import hmac
+ import os
++from uuid import uuid4
+ from urllib.parse import urlencode
+ import json
+ import base64
+@@
+-from universal_cache import (
++from universal_cache import (
+     init_universal_cache_db, 
+     update_cache_from_positions,
+     get_cache_stats, 
+     add_manual_pair,
+     update_sync_timestamp,
+     get_last_sync_timestamp,
+     detect_closed_positions
+ )
+ 
+-    
+-#==== codigo para sincronizar con universal_cache    
++    
++#==== codigo para sincronizar con universal_cache
++
++# ===== Manual Open Positions (in-memory overlay) =====
++MANUAL_OPEN_POS = {}  # manual_id -> dict
++
++VALID_SIDES = {"long", "short", "spotbuy", "spotsell"}
++VALID_EXCHANGES_MANUAL = [
++    "Arbitrum",
++    "Base OKX",
++    "BNB OKX",
++    "Ethereum OKX",
++    "Ourbit",
++    "Solana JUP",
++]
++
++def _now_s():
++    return int(time.time())
++
++def _num_or_none(x):
++    if x in ("", None):
++        return None
++    try:
++        return float(x)
++    except Exception:
++        return None
++
++def add_manual_open_to_cache(payload: dict) -> dict:
++    side = (payload.get("side") or "").strip().lower()
++    exchange = (payload.get("exchange") or "").strip()
++    if side not in VALID_SIDES:
++        raise ValueError(f"Invalid side: {side}")
++    if exchange not in VALID_EXCHANGES_MANUAL:
++        raise ValueError(f"Invalid exchange: {exchange}")
++
++    manual = {
++        "manual_id": str(uuid4()),
++        "exchange": exchange,
++        "symbol": (payload.get("symbol") or "").strip(),
++        "side": side,
++        "size": _num_or_none(payload.get("size")),
++        "entry_price": _num_or_none(payload.get("entry_price")),
++        "open_time": int(payload.get("open_time") or 0) or _now_s(),
++        "leverage": _num_or_none(payload.get("leverage")),
++        "liquidation_price": _num_or_none(payload.get("liquidation_price")),
++        "initial_margin": _num_or_none(payload.get("initial_margin")),
++        "notional": _num_or_none(payload.get("notional")),
++        "fee_total": _num_or_none(payload.get("fee_total")),
++        "funding_total": _num_or_none(payload.get("funding_total")),
++        "_source": "manual",
++    }
++    MANUAL_OPEN_POS[manual["manual_id"]] = manual
++    # Inyectar al universal cache para que aparezca y se empareje
++    try:
++        update_cache_from_positions(exchange, [manual])
++    except Exception:
++        pass
++    return manual
++
++def delete_manual_open(manual_id: str) -> bool:
++    data = MANUAL_OPEN_POS.pop(manual_id, None)
++    if not data:
++        return False
++    try:
++        # disparar un refresh mínimo en ese exchange
++        update_cache_from_positions(data["exchange"], [])
++    except Exception:
++        pass
++    return True
+@@
+ def some_existing_route_or_function():
+     pass
+@@
++# === Manual Open Positions API ===
++@app.post("/api/open/manual/add")
++def api_open_manual_add():
++    payload = request.get_json(force=True)
++    try:
++        out = add_manual_open_to_cache(payload)
++        return jsonify({"ok": True, "manual": out}), 200
++    except Exception as e:
++        return jsonify({"ok": False, "error": str(e)}), 400
++
++@app.post("/api/open/manual/delete")
++def api_open_manual_delete():
++    payload = request.get_json(force=True)
++    manual_id = (payload.get("manual_id") or "").strip()
++    if not manual_id:
++        return jsonify({"ok": False, "error": "manual_id required"}), 400
++    ok = delete_manual_open(manual_id)
++    return jsonify({"ok": ok}), (200 if ok else 404)
++
++@app.post("/api/open/manual/close")
++def api_open_manual_close():
++    from db_manager import save_closed_position
++    payload = request.get_json(force=True)
++    manual_id = (payload.get("manual_id") or "").strip()
++    if not manual_id or manual_id not in MANUAL_OPEN_POS:
++        return jsonify({"ok": False, "error": "manual_id not found"}), 404
++
++    src = MANUAL_OPEN_POS[manual_id]
++    close_price = _num_or_none(payload.get("close_price"))
++    if close_price is None:
++        return jsonify({"ok": False, "error": "close_price required"}), 400
++    close_time = int(payload.get("close_time") or 0) or _now_s()
++
++    final = {
++        "exchange": src.get("exchange"),
++        "symbol": src.get("symbol"),
++        "side": src.get("side"),
++        "size": src.get("size"),
++        "entry_price": src.get("entry_price"),
++        "close_price": close_price,
++        "open_time": int(src.get("open_time") or 0),
++        "close_time": close_time,
++        "pnl": _num_or_none(payload.get("pnl")),
++        "fee_total": _num_or_none(payload.get("fee_total")) if payload.get("fee_total") is not None else src.get("fee_total"),
++        "funding_total": _num_or_none(payload.get("funding_total")) if payload.get("funding_total") is not None else src.get("funding_total"),
++        "leverage": _num_or_none(payload.get("leverage")) if payload.get("leverage") is not None else src.get("leverage"),
++        "initial_margin": _num_or_none(payload.get("initial_margin")) if payload.get("initial_margin") is not None else src.get("initial_margin"),
++        "notional": _num_or_none(payload.get("notional")) if payload.get("notional") is not None else src.get("notional"),
++        "liquidation_price": _num_or_none(payload.get("liquidation_price")) if payload.get("liquidation_price") is not None else src.get("liquidation_price"),
++    }
++    try:
++        save_closed_position(final)
++    except Exception as e:
++        return jsonify({"ok": False, "error": f"save_closed_position: {e}"}), 500
++
++    delete_manual_open(manual_id)
++    return jsonify({"ok": True}), 200
+

@@ -3,6 +3,7 @@ funcionan/
 tests/
 debug/
 paradex_raw_dumps/
+Old files/
 
 # === ARCHIVOS DE CONFIGURACIÓN SENSIBLES ===
 .env
