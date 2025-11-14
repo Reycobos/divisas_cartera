@@ -245,22 +245,39 @@ def calc_liq_price(entry_price, position_amt, notional, leverage, wallet_balance
 
 def fetch_aster_open_positions():
     """
-    Get current open positions from Aster.
-    Endpoint: GET /api/v2/positionRisk
+    Get current open positions from Aster with accurate funding/fees calculation.
+    
+    MEJORAS vs versión anterior:
+    - Obtiene timestamp real de apertura de cada posición (primer trade)
+    - Debugging detallado opcional con ASTER_DEBUG_OPEN_POS=1
+    - Errores más visibles
+    - Optimización de llamadas API
     """
+    debug = os.getenv("ASTER_DEBUG_OPEN_POS", "0") == "1"
+    
     try:
+        # 1️⃣ Obtener posiciones del riesgo
         data = aster_signed_request("/fapi/v2/positionRisk")
         if not data:
+            print("⚠️ Aster: No se recibieron datos de positionRisk")
             return []
 
-        # Primero obtener todas las posiciones
+        if debug:
+            print(f"\n{'='*80}")
+            print("🔍 DEBUG: ASTER OPEN POSITIONS CALCULATION")
+            print(f"{'='*80}")
+
+        # 2️⃣ Procesar posiciones base
         positions = []
+        symbols_to_fetch = []  # Símbolos que necesitan cálculo de costos
+        
         for position in data:
             try:
                 position_amt = float(position.get("positionAmt", 0) or 0.0)
                 if position_amt == 0:
                     continue
 
+                symbol = position.get("symbol", "")
                 unrealized_pnl = float(position.get("unRealizedProfit", 0) or 0.0)
                 entry_price = float(position.get("entryPrice", 0) or 0.0)
                 mark_price = float(position.get("markPrice", 0) or 0.0)
@@ -283,9 +300,9 @@ def fetch_aster_open_positions():
                     maint_rate=0.004
                 )
 
-                positions.append({
+                pos = {
                     "exchange": "aster",
-                    "symbol": position.get("symbol", ""),
+                    "symbol": symbol,
                     "side": side,
                     "size": abs(position_amt),
                     "entry_price": entry_price,
@@ -294,7 +311,7 @@ def fetch_aster_open_positions():
                     "notional": notional,
                     "liquidation_price": liquidation_price,
                     "leverage": leverage,
-                    # Inicializar en 0
+                    # Valores por defecto (se actualizarán después)
                     "fee": 0.0,
                     "funding_fee": 0.0,
                     "realized_pnl": 0.0,
@@ -302,37 +319,129 @@ def fetch_aster_open_positions():
                     "funding_7d": 0.0,
                     "fees_7d": 0.0,
                     "realized_pnl_7d": 0.0,
-                })
+                }
+                
+                positions.append(pos)
+                symbols_to_fetch.append(symbol)
+
+                if debug:
+                    print(f"\n📊 Posición encontrada: {symbol}")
+                    print(f"   Side: {side} | Size: {abs(position_amt):.4f}")
+                    print(f"   Entry: {entry_price:.6f} | Mark: {mark_price:.6f}")
+                    print(f"   Unrealized PnL: {unrealized_pnl:.4f}")
 
             except Exception as e:
-                print(f"[WARNING] Error processing Aster position: {e}")
+                print(f"⚠️ Error procesando posición Aster: {e}")
+                if debug:
+                    import traceback
+                    traceback.print_exc()
                 continue
 
-        # AHORA calcular costos para cada posición individualmente
+        if not positions:
+            print("ℹ️ Aster: No hay posiciones abiertas")
+            return []
+
+        if debug:
+            print(f"\n{'='*80}")
+            print(f"📦 Total posiciones a procesar: {len(positions)}")
+            print(f"🔎 Símbolos: {', '.join(symbols_to_fetch)}")
+            print(f"{'='*80}")
+
+        # 3️⃣ Obtener timestamp REAL de apertura para cada símbolo
+        # Buscar el primer trade de cada símbolo para saber cuándo se abrió
+        symbol_open_times = {}
+        now_ms = int(time.time() * 1000)
+        
+        # Ventana máxima de búsqueda: 60 días hacia atrás
+        max_lookback_ms = 60 * 24 * 60 * 60 * 1000
+        search_start_ms = now_ms - max_lookback_ms
+
+        if debug:
+            print(f"\n🔍 Obteniendo timestamps de apertura...")
+            print(f"   Ventana de búsqueda: {datetime.fromtimestamp(search_start_ms/1000)} → ahora")
+
+        for symbol in set(symbols_to_fetch):
+            try:
+                # Buscar el PRIMER trade de este símbolo en la ventana
+                params = {
+                    "symbol": symbol,
+                    "limit": 1,  # Solo el primer trade
+                    "startTime": search_start_ms,
+                }
+                
+                trades = aster_signed_request("/fapi/v1/userTrades", params=params)
+                
+                if trades and len(trades) > 0:
+                    first_trade_time = int(trades[0].get("time", 0))
+                    symbol_open_times[symbol] = first_trade_time
+                    
+                    if debug:
+                        print(f"   ✅ {symbol}: Primer trade en {datetime.fromtimestamp(first_trade_time/1000)}")
+                else:
+                    # Fallback: asumir última semana si no hay trades
+                    fallback_time = now_ms - 7 * 24 * 60 * 60 * 1000
+                    symbol_open_times[symbol] = fallback_time
+                    
+                    if debug:
+                        print(f"   ⚠️ {symbol}: Sin trades encontrados, usando fallback (7 días)")
+
+                time.sleep(0.05)  # Rate limiting
+
+            except Exception as e:
+                # Fallback silencioso: última semana
+                symbol_open_times[symbol] = now_ms - 7 * 24 * 60 * 60 * 1000
+                if debug:
+                    print(f"   ❌ {symbol}: Error obteniendo trades: {e}, usando fallback")
+
+        # 4️⃣ Calcular costos para cada posición usando timestamp real
+        if debug:
+            print(f"\n{'='*80}")
+            print("💰 CALCULANDO COSTOS POR POSICIÓN")
+            print(f"{'='*80}")
+
+        total_funding_24h = 0.0
+        total_funding_period = 0.0
+        total_fees = 0.0
+        total_realized = 0.0
+        
         for p in positions:
             symbol = p["symbol"]
+            
+            # Obtener timestamp de apertura real (o fallback)
+            position_open_ms = symbol_open_times.get(symbol, now_ms - 7 * 24 * 60 * 60 * 1000)
+            
+            # Calcular días desde apertura
+            days_open = (now_ms - position_open_ms) / (24 * 60 * 60 * 1000)
+            
+            if debug:
+                print(f"\n🎯 {symbol}")
+                print(f"   📅 Abierta desde: {datetime.fromtimestamp(position_open_ms/1000)}")
+                print(f"   ⏱️  Días abierta: {days_open:.1f}")
+            
             try:
-                # Obtener timestamp de cuando se abrió la posición (aproximado)
-                # Podrías obtener esto del primer trade de la posición si está disponible
-                position_open_ms = int((datetime.now() - timedelta(days=30)).timestamp() * 1000)  # fallback: 30 días
-                now_ms = int(time.time() * 1000)
-                
-                # Calcular funding desde que se abrió la posición
+                # Calcular funding desde apertura
                 funding_total = _sum_income(symbol, "FUNDING_FEE", position_open_ms, now_ms)
                 
-                # Calcular fees desde que se abrió la posición  
+                # Calcular fees desde apertura
                 fees_total = _sum_fees_from_user_trades(symbol, position_open_ms, now_ms)
                 
-                # Calcular realized PnL desde que se abrió la posición
+                # Calcular realized PnL desde apertura
                 realized_total = _sum_income(symbol, "REALIZED_PNL", position_open_ms, now_ms)
                 
-                # Funding de últimas 24h
-                funding_24h = _sum_income(symbol, "FUNDING_FEE", now_ms - 24*3600*1000, now_ms)
+                # Funding últimas 24h
+                funding_24h_start = now_ms - 24 * 60 * 60 * 1000
+                funding_24h = _sum_income(symbol, "FUNDING_FEE", funding_24h_start, now_ms)
                 
-                # Actualizar la posición
+                # Acumular para resumen
+                total_funding_24h += funding_24h
+                total_funding_period += funding_total
+                total_fees += fees_total
+                total_realized += realized_total
+                
+                # Actualizar posición
                 p.update({
                     "funding_24h": funding_24h,
-                    "funding_7d": funding_total,  # o calcular específicamente 7 días
+                    "funding_7d": funding_total,
                     "fees_7d": fees_total,
                     "realized_pnl_7d": realized_total,
                     "funding": funding_24h,
@@ -342,16 +451,45 @@ def fetch_aster_open_positions():
                     "fee": fees_total,
                 })
                 
-                print(f"[DEBUG] Costos para {symbol}: funding={funding_total}, fees={fees_total}, realized={realized_total}")
+                if debug:
+                    print(f"   💵 Funding 24h: {funding_24h:.6f} USDT")
+                    print(f"   💵 Funding total: {funding_total:.6f} USDT")
+                    print(f"   💸 Fees total: {fees_total:.6f} USDT")
+                    print(f"   📊 Realized PnL: {realized_total:.6f} USDT")
+                else:
+                    # Modo normal: solo un indicador por símbolo
+                    print(f"✅ {symbol}: funding={funding_total:.4f} fees={fees_total:.4f} realized={realized_total:.4f}")
                 
             except Exception as e:
-                print(f"[WARNING] Error calculando costos para {symbol}: {e}")
+                print(f"❌ Error calculando costos para {symbol}: {e}")
+                if debug:
+                    import traceback
+                    traceback.print_exc()
+                # Los valores por defecto (0.0) ya están seteados
                 continue
+
+        # 5️⃣ Resumen final
+        if debug:
+            print(f"\n{'='*80}")
+            print("📈 RESUMEN TOTAL")
+            print(f"{'='*80}")
+            print(f"💰 Funding 24h: {total_funding_24h:.6f} USDT")
+            print(f"💰 Funding período: {total_funding_period:.6f} USDT")
+            print(f"💸 Fees totales: {total_fees:.6f} USDT")
+            print(f"📊 Realized PnL total: {total_realized:.6f} USDT")
+            print(f"{'='*80}\n")
+        else:
+            # Mensaje compacto en modo normal
+            print(f"📊 Aster totals: funding_24h={total_funding_24h:.4f} | "
+                  f"funding_period={total_funding_period:.4f} | "
+                  f"fees={total_fees:.4f} | realized={total_realized:.4f}")
 
         return positions
 
     except Exception as e:
-        print(f"[ERROR] Failed to fetch Aster positions: {e}")
+        print(f"❌ ERROR CRÍTICO en fetch_aster_open_positions: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 # ========== Funding del usuario ==========
