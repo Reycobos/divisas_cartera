@@ -609,29 +609,106 @@ def fetch_funding_aster_windowed(
               f"{datetime.utcfromtimestamp(last/1000):%Y-%m-%d %H:%M})")
     return out
 
+def _fmt_ms(ms) -> str:
+    """Convierte ms/seg a 'YYYY-MM-DD HH:MM:SS UTC'."""
+    try:
+        ms = int(ms or 0)
+        if ms and ms < 1_000_000_000_000:  # venía en segundos
+            ms *= 1000
+        return datetime.fromtimestamp(ms/1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except Exception:
+        return str(ms)
 
 def pull_funding_aster(**kwargs) -> List[Dict[str, Any]]:
     """
     Wrapper tolerante para el sync:
       - acepta since (ms) y/o force_days
       - ignora kwargs desconocidos (evita TypeError)
+      
+    🔧 MEJORAS:
+      - Debugging detallado con ASTER_DEBUG_FUNDING=1
+      - Amplía ventana si since es muy reciente (< 1 hora)
+      - Mejor manejo de errores
     """
     now_ms = int(time.time() * 1000)
     force_days = kwargs.get("force_days", None)
     since = kwargs.get("since", None)
     symbol = kwargs.get("symbol", None)
-    debug = kwargs.get("debug", False)
+    debug = kwargs.get("debug", False) or os.getenv("ASTER_DEBUG_FUNDING") == "1"
+    
+    # 🔍 DEBUGGING: Mostrar parámetros recibidos
+    if debug:
+        print(f"\n{'='*60}")
+        print(f"🔍 [ASTER FUNDING DEBUG]")
+        print(f"{'='*60}")
+        print(f"   force_days: {force_days}")
+        print(f"   since: {since} ({_fmt_ms(since) if since else 'None'})")
+        print(f"   symbol: {symbol or 'ALL'}")
+        print(f"   now_ms: {now_ms} ({_fmt_ms(now_ms)})")
 
-    if isinstance(force_days, int):
-        return fetch_funding_aster_windowed(days=int(force_days), symbol=symbol, debug=debug)
+    # ⚠️ PROTECCIÓN: Si since es muy reciente (< 1 hora), ampliar a 7 días
+    # Esto evita que pida rangos donde aún no hay funding registrado
     if since is not None:
         try:
-            return fetch_funding_aster_windowed(since_ms=int(since), until_ms=now_ms, symbol=symbol, debug=debug)
+            since = int(since)
+            time_diff_hours = (now_ms - since) / (3600 * 1000)
+            if time_diff_hours < 1:
+                old_since = since
+                since = now_ms - (7 * 24 * 3600 * 1000)
+                if debug:
+                    print(f"   ⚠️ since demasiado reciente ({time_diff_hours:.1f}h)")
+                    print(f"   📅 Ampliando ventana: {_fmt_ms(old_since)} → {_fmt_ms(since)}")
         except Exception:
-            # si 'since' viene raro (str 'None', etc.), cae al default 7 días
-            return fetch_funding_aster_windowed(days=7, symbol=symbol, debug=debug)
-    # default: últimos 7 días
-    return fetch_funding_aster_windowed(days=7, symbol=symbol, debug=debug)
+            since = None
+
+    # 📦 Determinar método de sincronización
+    if isinstance(force_days, int) and force_days > 0:
+        if debug:
+            print(f"   🎯 Modo: FORCE {force_days} días")
+        result = fetch_funding_aster_windowed(days=int(force_days), symbol=symbol, debug=debug)
+        
+    elif since is not None:
+        try:
+            days_approx = int((now_ms - int(since)) / (24 * 3600 * 1000)) + 1
+            if debug:
+                print(f"   🎯 Modo: SINCE {_fmt_ms(since)} (~{days_approx} días)")
+            result = fetch_funding_aster_windowed(
+                since_ms=int(since), 
+                until_ms=now_ms, 
+                symbol=symbol, 
+                debug=debug
+            )
+        except Exception as e:
+            if debug:
+                print(f"   ❌ Error con since: {e}")
+                print(f"   🔄 Fallback a 7 días")
+            result = fetch_funding_aster_windowed(days=7, symbol=symbol, debug=debug)
+    else:
+        # default: últimos 7 días
+        if debug:
+            print(f"   🎯 Modo: DEFAULT (7 días)")
+        result = fetch_funding_aster_windowed(days=7, symbol=symbol, debug=debug)
+    
+    # 📊 Resumen de resultados
+    if debug:
+        print(f"\n   📊 RESULTADO:")
+        print(f"      Total registros: {len(result)}")
+        if result:
+            first_ts = result[0].get('timestamp', 0)
+            last_ts = result[-1].get('timestamp', 0)
+            print(f"      Primer registro: {_fmt_ms(first_ts)}")
+            print(f"      Último registro: {_fmt_ms(last_ts)}")
+            
+            # Mostrar algunos ejemplos
+            print(f"\n   📋 Ejemplos (primeros 3):")
+            for i, r in enumerate(result[:3]):
+                sym = r.get('symbol', '?')
+                inc = r.get('income', 0)
+                ts = r.get('timestamp', 0)
+                print(f"      {i+1}. {sym}: {inc:.6f} USDT ({_fmt_ms(ts)})")
+        print(f"{'='*60}\n")
+    
+    return result
 
 # ========== Reconstrucción de posiciones cerradas ==========
 def fetch_closed_positions_aster(
