@@ -624,6 +624,23 @@
 
         <!-- OPEN POSITIONS -->
         <div class="tab-pane fade" id="positions" role="tabpanel">
+          <!-- Header con botones -->
+          <div
+            class="closed-header d-flex align-items-center justify-content-between mb-3"
+          >
+            <div
+              class="closed-header-left d-flex align-items-center gap-3 flex-wrap"
+            >
+              <h4 class="mb-0">Open Positions</h4>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <button id="btnAddManualOpen" class="btn btn-primary">
+                ➕ Add Manual Open
+              </button>
+              <button id="refreshOpen" class="refresh-btn">🔄 Refresh</button>
+            </div>
+          </div>
+          <!-- Contenedor de posiciones -->
           <div id="positions-container"></div>
         </div>
 
@@ -816,12 +833,33 @@
           <div class="row g-3" id="manual-closed-form">
             <div class="col-md-2">
               <label class="form-label">Exchange</label>
-              <input
-                type="text"
-                id="m-exchange"
-                class="form-control dark-input"
-                placeholder="bybit / gate / ..."
-              />
+              <!-- select con exchanges (orden alfabético) -->
+              <select id="m-exchange" class="form-select dark-input">
+                <option value="">-- select --</option>
+                <option value="aden">Aden</option>
+                <option value="Arbitrum">Arbitrum</option>
+                <option value="aster">Aster</option>
+                <option value="backpack">Backpack</option>
+                <option value="Base OKX">Base OKX</option>
+                <option value="binance">Binance</option>
+                <option value="bingx">BingX</option>
+                <option value="bitget">Bitget</option>
+                <option value="BNB OKX">BNB OKX</option>
+                <option value="bybit">Bybit</option>
+                <option value="Ethereum OKX">Ethereum OKX</option>
+                <option value="extended">Extended</option>
+                <option value="gate">Gate</option>
+                <option value="hyperliquid">Hyperliquid</option>
+                <option value="kucoin">KuCoin</option>
+                <option value="lbank">Lbank</option>
+                <option value="mexc">MEXC</option>
+                <option value="okx">OKX</option>
+                <option value="Ourbit">Ourbit</option>
+                <option value="paradex">Paradex</option>
+                <option value="Solana JUP">Solana JUP</option>
+                <option value="whitebit">WhiteBIT</option>
+                <option value="xt">XT</option>
+              </select>
             </div>
             <div class="col-md-2">
               <label class="form-label">Symbol</label>
@@ -834,12 +872,13 @@
             </div>
             <div class="col-md-2">
               <label class="form-label">Side</label>
+              <!-- lado: long / short / spotbuy / spotsell -->
               <select id="m-side" class="form-select dark-input">
-                <option value="LONG">LONG</option>
-                <option value="SHORT">SHORT</option>
-                <option value="SPOTBUY">SPOTBUY</option>
-                <option value="SPOTSELL">SPOTSELL</option>
-                <option value="SWAPSTABLE">SWAPSTABLE</option>
+                <option value="">-- select --</option>
+                <option value="long">long</option>
+                <option value="short">short</option>
+                <option value="spotbuy">spotbuy</option>
+                <option value="spotsell">spotsell</option>
               </select>
             </div>
             <div class="col-md-2">
@@ -1067,6 +1106,197 @@
             <button type="button" class="btn btn-primary" id="save-size-btn">
               Save Changes
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+      <div class="modal" id="modalManualOpen" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content bg-dark text-white">
+            <div class="modal-header">
+              <h5 class="modal-title">Add manual open position</h5>
+              <button
+                type="button"
+                class="btn-close btn-close-white"
+                data-bs-dismiss="modal"
+                aria-label="Close"
+              ></button>
+            </div>
+            <div class="modal-body">
+              <form id="formManualOpen" class="row g-3">
+                <div class="col-md-4">
+                  <label class="form-label">Exchange</label>
+                  <select name="exchange" class="form-select">
+                    <option>Arbitrum</option>
+                    <option>Base OKX</option>
+                    <option>BNB OKX</option>
+                    <option>Ethereum OKX</option>
+                    <option>Lbank</option>
+                    <option>Ourbit</option>
+                    <option>Solana JUP</option>
+                  </select>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Symbol</label>
+                  <input
+                    name="symbol"
+                    class="form-control"
+                    placeholder="e.g. BTC"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Side</label>
+                  <select name="side" class="form-select">
+                    <option value="long">long</option>
+                    <option value="short">short</option>
+                    <option value="spotbuy">spotbuy</option>
+                    <option value="spotsell">spotsell</option>
+                  </select>
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label">Size</label>
+                  <input
+                    name="size"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Entry price</label>
+                  <input
+                    name="entry_price"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Open time (epoch s)</label>
+                  <input name="open_time" type="number" class="form-control" />
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label">Leverage</label>
+                  <input
+                    name="leverage"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Liquidation price</label>
+                  <input
+                    name="liquidation_price"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+
+                <div class="col-md-4">
+                  <label class="form-label">Initial margin</label>
+                  <input
+                    name="initial_margin"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Notional</label>
+                  <input
+                    name="notional"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Fee total</label>
+                  <input
+                    name="fee_total"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label">Funding total</label>
+                  <input
+                    name="funding_total"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+              </form>
+              <div id="manualOpenMsg" class="small text-info mt-2"></div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" data-bs-dismiss="modal">
+                Cancel
+              </button>
+              <button id="btnManualOpenSave" class="btn btn-success">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: Send manual open to closed -->
+      <div class="modal fade" id="modalSendClosed" tabindex="-1">
+        <div class="modal-dialog">
+          <div class="modal-content bg-dark text-white">
+            <div class="modal-header">
+              <h5 class="modal-title">Send to Closed Positions</h5>
+              <button
+                type="button"
+                class="btn-close btn-close-white"
+                data-bs-dismiss="modal"
+              ></button>
+            </div>
+            <div class="modal-body">
+              <form id="formSendClosed" class="row g-3">
+                <input type="hidden" name="manual_id" />
+                <div class="col-md-6">
+                  <label class="form-label">Close price</label>
+                  <input
+                    name="close_price"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Price PnL</label>
+                  <input
+                    name="pnl"
+                    type="number"
+                    step="any"
+                    class="form-control"
+                  />
+                </div>
+                <div class="col-md-12">
+                  <label class="form-label">Close time (epoch s)</label>
+                  <input name="close_time" type="number" class="form-control" />
+                </div>
+              </form>
+              <div id="sendClosedMsg" class="small text-info mt-2"></div>
+            </div>
+            <div class="modal-footer">
+              <button class="btn btn-secondary" data-bs-dismiss="modal">
+                Cancel
+              </button>
+              <button id="btnSendClosedSave" class="btn btn-success">
+                Send
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1876,14 +2106,28 @@
                     ? "pnl-positive"
                     : "pnl-negative"
                 }">$${fmt(p?.realized_pnl, 2)}</td>
-                <td>
-                  <button class="btn btn-sm btn-outline-warning edit-size-btn" 
-                          data-exchange="${p?.exchange || ""}" 
-                          data-symbol="${p?.symbol || ""}" 
-                          data-current-size="${fmt(displaySize, 2)}">
-                    ✏️ Edit Size
-                  </button>
-                </td>
+                    <td>
+                      <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-warning edit-size-btn"
+                                data-exchange="${p?.exchange || ""}"
+                                data-symbol="${p?.symbol || ""}"
+                                data-current-size="${fmt(displaySize, 2)}">
+                          ✏️ Edit Size
+                        </button>
+                        ${
+                          p?._source === "manual" || !!p?.manual_id
+                            ? `
+                          <button class="btn btn-sm btn-outline-danger" data-action="del" data-id="${
+                            p?.manual_id || ""
+                          }">Delete</button>
+                          <button class="btn btn-sm btn-outline-success" data-action="send" data-id="${
+                            p?.manual_id || ""
+                          }">Send to closed</button>
+                        `
+                            : ""
+                        }
+                      </div>
+                    </td>
               </tr>`;
             });
 
@@ -3057,6 +3301,166 @@
             }
           });
       });
+    </script>
+    <script>
+      // ====== Refresh Open Positions ======
+      window.loadOpenPositions = function () {
+        return fetch("/api/positions")
+          .then((r) => r.json())
+          .then((data) => {
+            const container = document.getElementById("positions-container");
+            if (!container) return;
+
+            // Disparar el evento de recarga si existe el código de renderizado
+            const event = new CustomEvent("reloadPositions", { detail: data });
+            document.dispatchEvent(event);
+
+            console.log("✅ Open positions refreshed");
+          })
+          .catch((err) => {
+            console.error("❌ Error refreshing open positions:", err);
+          });
+      };
+
+      // Botón de refresh
+      document.addEventListener("DOMContentLoaded", function () {
+        const refreshOpen = document.getElementById("refreshOpen");
+        if (refreshOpen) {
+          refreshOpen.addEventListener("click", function () {
+            console.log("🔄 Refreshing open positions...");
+            // Recargar la página completa es la forma más simple
+            window.location.reload();
+          });
+        }
+      });
+    </script>
+
+    <script>
+      // ====== Manual Open (UI) ======
+      (function () {
+        const addManualBtn = document.getElementById("btnAddManualOpen");
+        const modalManualEl = document.getElementById("modalManualOpen");
+        const modalManualOpen = modalManualEl
+          ? new bootstrap.Modal(modalManualEl)
+          : null;
+        const manualOpenMsg = document.getElementById("manualOpenMsg");
+
+        if (addManualBtn) {
+          addManualBtn.addEventListener("click", () => {
+            if (document.getElementById("formManualOpen"))
+              document.getElementById("formManualOpen").reset();
+            if (manualOpenMsg) manualOpenMsg.textContent = "";
+            modalManualOpen && modalManualOpen.show();
+          });
+        }
+
+        document
+          .getElementById("btnManualOpenSave")
+          ?.addEventListener("click", async () => {
+            if (manualOpenMsg) manualOpenMsg.textContent = "Saving…";
+            const form = document.getElementById("formManualOpen");
+            const fd = new FormData(form);
+            const payload = Object.fromEntries(fd.entries());
+
+            try {
+              const res = await fetch("/api/open/manual/add", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const data = await res.json();
+              if (!res.ok || !data.ok)
+                throw new Error(data.error || "Error saving manual open");
+              if (manualOpenMsg) manualOpenMsg.textContent = "✅ Saved";
+              modalManualOpen && modalManualOpen.hide();
+              // recargar open positions si existe la función
+              try {
+                window.loadOpenPositions && window.loadOpenPositions();
+              } catch (e) {}
+            } catch (e) {
+              if (manualOpenMsg) manualOpenMsg.textContent = "❌ " + e.message;
+            }
+          });
+
+        // Send to closed
+        const modalSendEl = document.getElementById("modalSendClosed");
+        const modalSendClosed = modalSendEl
+          ? new bootstrap.Modal(modalSendEl)
+          : null;
+        const sendClosedMsg = document.getElementById("sendClosedMsg");
+
+        document
+          .getElementById("btnSendClosedSave")
+          ?.addEventListener("click", async () => {
+            if (sendClosedMsg) sendClosedMsg.textContent = "Sending…";
+            const form = document.getElementById("formSendClosed");
+            const fd = new FormData(form);
+            const payload = Object.fromEntries(fd.entries());
+            payload.close_price = payload.close_price
+              ? Number(payload.close_price)
+              : null;
+            payload.pnl = payload.pnl ? Number(payload.pnl) : null;
+            payload.close_time = payload.close_time
+              ? Number(payload.close_time)
+              : null;
+
+            try {
+              const res = await fetch("/api/open/manual/close", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const data = await res.json();
+              if (!res.ok || !data.ok)
+                throw new Error(data.error || "Error sending to closed");
+              if (sendClosedMsg) sendClosedMsg.textContent = "✅ Sent";
+              modalSendClosed && modalSendClosed.hide();
+              try {
+                window.loadOpenPositions && window.loadOpenPositions();
+              } catch (e) {}
+              try {
+                window.loadClosedPositions && window.loadClosedPositions();
+              } catch (e) {}
+            } catch (e) {
+              if (sendClosedMsg) sendClosedMsg.textContent = "❌ " + e.message;
+            }
+          });
+
+        // Delegation for Delete / Send buttons in rows
+        document.addEventListener("click", async (ev) => {
+          const btn =
+            ev.target.closest && ev.target.closest("button[data-action]");
+          if (!btn) return;
+          const action = btn.getAttribute("data-action");
+          const id = btn.getAttribute("data-id");
+          if (action === "del") {
+            if (!confirm("¿Delete manual open position?")) return;
+            try {
+              const res = await fetch("/api/open/manual/delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ manual_id: id }),
+              });
+              const data = await res.json();
+              if (data?.ok) {
+                try {
+                  window.loadOpenPositions && window.loadOpenPositions();
+                } catch (e) {}
+              } else {
+                alert("Delete failed: " + (data?.error || ""));
+              }
+            } catch (e) {
+              alert("Delete failed: " + e.message);
+            }
+          } else if (action === "send") {
+            if (!document.querySelector("#formSendClosed")) return;
+            document.querySelector("#formSendClosed").reset();
+            document.querySelector("#formSendClosed [name=manual_id]").value =
+              id;
+            modalSendClosed && modalSendClosed.show();
+          }
+        });
+      })();
     </script>
   </body>
 </html>

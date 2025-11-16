@@ -679,6 +679,80 @@ def main_balances():
             print(f"⏭️  Saltando {exchange_name.capitalize()}")
 
     print("🧩 Consulta de balances completada.")
+    
+
+
+# ====== Manual Open Positions Cache ======
+from uuid import uuid4
+
+MANUAL_OPEN_POS = {}  # manual_id -> dict
+
+VALID_SIDES = {"long", "short", "spotbuy", "spotsell"}
+VALID_EXCHANGES_MANUAL = [
+    "Arbitrum",
+    "Base OKX",
+    "BNB OKX",
+    "Ethereum OKX",
+    "Lbank",
+    "Ourbit",
+    "Solana JUP",
+]
+
+def _now_s():
+    import time
+    return int(time.time())
+
+def add_manual_open_to_cache(payload: dict) -> dict:
+    # Normaliza entradas. Vacíos quedan como None.
+    def _n(x):
+        if x in ("", None): return None
+        try: return float(x)
+        except: return None
+
+    side = (payload.get("side") or "").strip().lower()
+    exchange = (payload.get("exchange") or "").strip()
+
+    if side not in VALID_SIDES:
+        raise ValueError(f"Invalid side: {side}")
+    if exchange not in VALID_EXCHANGES_MANUAL:
+        raise ValueError(f"Invalid exchange: {exchange}")
+
+    manual = {
+        "manual_id": str(uuid4()),
+        "exchange": exchange,
+        "symbol": (payload.get("symbol") or "").strip(),
+        "side": side,
+        "size": _n(payload.get("size")),
+        "entry_price": _n(payload.get("entry_price")),
+        "open_time": int(payload.get("open_time") or 0) or _now_s(),
+        "leverage": _n(payload.get("leverage")),
+        "liquidation_price": _n(payload.get("liquidation_price")),
+        "initial_margin": _n(payload.get("initial_margin")),
+        "notional": _n(payload.get("notional")),
+        "fee_total": _n(payload.get("fee_total")),
+        "funding_total": _n(payload.get("funding_total")),
+        # Puedes añadir aquí cualquier otro campo opcional que uses en tu cache
+        "_source": "manual",
+    }
+    MANUAL_OPEN_POS[manual["manual_id"]] = manual
+    # Inyectar al cache universal de abiertas para que se vea y empareje
+    try:
+        update_cache_from_positions(exchange, [manual])
+    except Exception:
+        pass
+    return manual
+
+def delete_manual_open(manual_id: str) -> bool:
+    data = MANUAL_OPEN_POS.pop(manual_id, None)
+    if not data:
+        return False
+    # Saca del cache universal (según cómo lo almacenes; aquí forzamos refresh mínimo)
+    try:
+        # Si tienes una función específica para “remove”, úsala. Si no, refresca recalculando.
+        update_cache_from_positions(data["exchange"], [])
+    except Exception:
+        pass
+    return True
 #===============Codigo para insertar funding en base de datos
 
 def _ms_now(): return int(time.time()*1000)
@@ -835,6 +909,88 @@ def sync_all_funding(exchanges: list | None = None,
             _set_sync_state(ex, last_run_ms=now_ms, last_ingested_ms=None)
 
     return inserted_by_ex
+
+# === Crear (Add manual open) ===
+@app.post("/api/open/manual/add")
+def api_open_manual_add():
+    payload = request.get_json(force=True)
+    try:
+        out = add_manual_open_to_cache(payload)
+        return jsonify({"ok": True, "manual": out}), 200
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+# === Eliminar (Delete manual open) ===
+@app.post("/api/open/manual/delete")
+def api_open_manual_delete():
+    payload = request.get_json(force=True)
+    manual_id = (payload.get("manual_id") or "").strip()
+    if not manual_id:
+        return jsonify({"ok": False, "error": "manual_id required"}), 400
+    ok = delete_manual_open(manual_id)
+    return jsonify({"ok": ok}), (200 if ok else 404)
+
+# === Enviar a Closed (Close & save) ===
+@app.post("/api/open/manual/close")
+def api_open_manual_close():
+    """
+    Body:
+      manual_id: str
+      close_price: number (requerido)
+      pnl: number (opcional, PnL de precio; si no viene, se calcula)
+      close_time: epoch s (opcional; si no viene, ahora)
+      fee_total, funding_total, leverage, initial_margin, notional, liquidation_price (opcionales)
+    """
+    from db_manager import save_closed_position  # usar tu función existente
+    payload = request.get_json(force=True)
+    manual_id = (payload.get("manual_id") or "").strip()
+    if not manual_id or manual_id not in MANUAL_OPEN_POS:
+        return jsonify({"ok": False, "error": "manual_id not found"}), 404
+
+    src = MANUAL_OPEN_POS[manual_id]
+
+    # Cierre: mezcla los datos del manual con lo que viene del modal
+    def _n(x):
+        if x in ("", None): return None
+        try: return float(x)
+        except: return None
+
+    close_price = _n(payload.get("close_price"))
+    if close_price is None:
+        return jsonify({"ok": False, "error": "close_price required"}), 400
+
+    close_time = int(payload.get("close_time") or 0) or _now_s()
+
+    final = {
+        "exchange": src.get("exchange"),
+        "symbol": src.get("symbol"),
+        "side": src.get("side"),
+        "size": src.get("size"),
+        "entry_price": src.get("entry_price"),
+        "close_price": close_price,
+        "open_time": int(src.get("open_time") or 0),
+        "close_time": close_time,
+        # Si el usuario provee pnl (price), lo respetamos; si no, que lo calcule save_closed_position
+        "pnl": _n(payload.get("pnl")),
+        # Hereda/corrige extras si los trae el modal (opcionales)
+        "fee_total": _n(payload.get("fee_total")) if payload.get("fee_total") is not None else src.get("fee_total"),
+        "funding_total": _n(payload.get("funding_total")) if payload.get("funding_total") is not None else src.get("funding_total"),
+        "leverage": _n(payload.get("leverage")) if payload.get("leverage") is not None else src.get("leverage"),
+        "initial_margin": _n(payload.get("initial_margin")) if payload.get("initial_margin") is not None else src.get("initial_margin"),
+        "notional": _n(payload.get("notional")) if payload.get("notional") is not None else src.get("notional"),
+        "liquidation_price": _n(payload.get("liquidation_price")) if payload.get("liquidation_price") is not None else src.get("liquidation_price"),
+    }
+
+    # Guardar en DB como cerrada
+    try:
+        save_closed_position(final)  # calcula apr, pnl%, realized, etc. como de costumbre
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"save_closed_position: {e}"}), 500
+
+    # Quitarla de abiertas
+    delete_manual_open(manual_id)
+
+    return jsonify({"ok": True}), 200
 
 @app.route('/api/funding')
 def api_funding():

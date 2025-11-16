@@ -438,17 +438,23 @@ def fetch_aster_open_positions():
                 total_fees += fees_total
                 total_realized += realized_total
                 
-                # Actualizar posición
+                # ✅ Hacer fees negativas (son un costo)
+                fees_total_negative = -abs(fees_total)
+                
+                # ✅ Calcular realized_pnl correctamente
+                # Para posiciones abiertas: realized_pnl = funding_fee + fees (negativo)
+                calculated_realized_pnl = funding_total + fees_total_negative
+                
                 p.update({
                     "funding_24h": funding_24h,
                     "funding_7d": funding_total,
-                    "fees_7d": fees_total,
-                    "realized_pnl_7d": realized_total,
+                    "fees_7d": fees_total_negative,          # ✅ Negativo
+                    "realized_pnl_7d": calculated_realized_pnl,  # ✅ Calculado
                     "funding": funding_24h,
-                    "fees": fees_total,
-                    "realized_pnl": realized_total,
+                    "fees": fees_total_negative,             # ✅ Negativo
+                    "realized_pnl": calculated_realized_pnl, # ✅ Calculado correctamente
                     "funding_fee": funding_total,
-                    "fee": fees_total,
+                    "fee": fees_total_negative,              # ✅ Negativo
                 })
                 
                 if debug:

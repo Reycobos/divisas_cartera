@@ -412,7 +412,7 @@ def fetch_gate_closed_positions(settle: str = "usdt", days_back: int = 30) -> Li
     """
     Obtiene posiciones cerradas con esquema exacto requerido
     """
-    print(f"🔍 DEBUG: Obteniendo POSICIONES CERRADAS ({settle.upper()})...")
+    # print(f"🔍 DEBUG: Obteniendo POSICIONES CERRADAS ({settle.upper()})...")
     
     settle = (settle or "usdt").lower()
     end_time = int(time.time())
@@ -428,7 +428,7 @@ def fetch_gate_closed_positions(settle: str = "usdt", days_back: int = 30) -> Li
     }
     
     try:
-        print(f"   🌐 Llamando endpoint: /futures/{settle}/position_close")
+        # print(f"   🌐 Llamando endpoint: /futures/{settle}/position_close")
         position_history = _request("GET", f"/futures/{settle}/position_close", params=params)
         #print(f"📦 DEBUG: Respuesta cruda de position_close: {position_history}")
         
