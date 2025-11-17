@@ -65,9 +65,15 @@ except Exception:
 from dotenv import load_dotenv
 load_dotenv()
 
+def _ensure_xt_keys():
+    if not XT_API_KEY or not XT_API_SECRET:
+        raise RuntimeError(
+            "XT API keys missing: define XT_API_KEY y XT_SECRET_KEY en .env o entorno."
+        )
+
 EXCHANGE = "xt"
 XT_API_KEY = os.getenv("XT_API_KEY")
-XT_API_SECRET = os.getenv("XT_SECRET_KEY")
+XT_API_SECRET = os.getenv("XT_API_SECRET")
 XT_FAPI_HOST = os.getenv("XT_FAPI_HOST", "https://fapi.xt.com")
 XT_SAPI_HOST = os.getenv("XT_SAPI_HOST", "https://sapi.xt.com")
 
@@ -197,6 +203,7 @@ def _get_perp() -> Perp:
 
 
 def fetch_xt_all_balances(db_path: str = "portfolio.db") -> Dict[str, Any]:
+    _ensure_xt_keys()
     """
     Devuelve estructura EXACTA para /api/balances combinando:
     - spot: /v4/balances
@@ -280,6 +287,7 @@ def fetch_xt_all_balances(db_path: str = "portfolio.db") -> Dict[str, Any]:
 # =========================================================
 # =========================================================
 def fetch_xt_open_positions() -> List[Dict[str, Any]]:
+    _ensure_xt_keys()
     """
     XT — Open positions (MEJORADA con fees y funding estimadas)
     """
@@ -404,6 +412,7 @@ def fetch_xt_funding_fees(limit: int = 50,
                           start_ms: Optional[int] = None,
                           end_ms: Optional[int] = None,
                           symbol: Optional[str] = None) -> List[Dict[str, Any]]:
+    _ensure_xt_keys()
     p_funding_fetching(EXCHANGE)
     cli = _get_perp()
 
@@ -887,6 +896,7 @@ def save_xt_closed_positions(db_path: str = "portfolio.db",
                              symbol: Optional[str] = None,
                              limit: int = 5000,
                              inject_funding: bool = True) -> int:
+    _ensure_xt_keys()
     """
     Reconstruye y guarda en SQLite usando db_manager.save_closed_position.
     Devuelve el número de bloques guardados.
@@ -914,6 +924,10 @@ def save_xt_closed_positions(db_path: str = "portfolio.db",
             else:
                 # puedes loguear si quieres, pero no contamos como guardada
                 pass
+            # ✅ imprimir y devolver métricas estándar
+    p_closed_sync_saved(EXCHANGE, saved, dup)
+    p_closed_sync_done(EXCHANGE)
+    return saved
 def debug_dump_xt_open_positions_raw(symbol: Optional[str] = None):
     """
     Imprime el RAW de GET /future/user/v1/position tal cual lo devuelve XT.

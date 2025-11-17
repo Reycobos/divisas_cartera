@@ -10,13 +10,52 @@ LBank NO tiene futuros, solo spot trading.
 
 import hashlib
 import hmac
+import sys
 import time
 import requests
 from collections import defaultdict
 from typing import List, Dict, Any, Optional
 import os
-from datetime import datetime, timedelta, timezone
 
+from datetime import datetime, timedelta, timezone
+from dotenv import load_dotenv
+load_dotenv()
+
+# Importar el cliente del SDK
+from lbank import BlockHttpClient
+# ... (el resto de tus imports) ...
+
+# =============================================================================
+# CONFIGURACIÓN
+# =============================================================================
+BASE_URL = "https://api.lbkex.com"
+# ... (API_KEY, SECRET_KEY) ...
+
+# 🆕 Cliente del SDK
+# Inicializamos el cliente una vez
+try:
+    LBANK_CLIENT = BlockHttpClient(
+        sign_method="HmacSHA256", # Usamos HmacSHA256, el que usas en tu código
+        api_key=API_KEY,
+        api_secret=SECRET_KEY,
+        base_url=BASE_URL,
+        log_level=1 # INFO
+    )
+except Exception as e:
+    print(f"[LBANK SDK] ❌ Error inicializando el cliente SDK: {e}")
+    LBANK_CLIENT = None
+
+
+
+
+# Obtener la ruta del directorio actual (adapters/)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Obtener la ruta del directorio padre (proyecto_raiz/)
+parent_dir = os.path.dirname(current_dir)
+
+# Añadir el directorio padre al sys.path para que Python lo vea
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 # Importar cache universal para gestión de pares
 try:
     from universal_cache import (
@@ -33,12 +72,13 @@ except ImportError:
 __all__ = [
     "fetch_lbank_all_balances",
     "save_lbank_closed_positions",
+    "add_manual_lbank_pair",
+    "set_debug_mode",
 ]
 
 # =============================================================================
 # CONFIGURACIÓN
 # =============================================================================
-BASE_URL = "https://api.lbkex.com"
 API_KEY = os.getenv("LBANK_API_KEY", "")
 SECRET_KEY = os.getenv("LBANK_SECRET_KEY", "")
 
@@ -47,6 +87,27 @@ DEBUG_REQUESTS = False
 
 # Tokens base a ignorar en el cache (no son pares de trading)
 IGNORE_TOKENS = {"BTC", "ETH", "USDT", "USDC", "BUSD"}
+
+
+# =============================================================================
+# UTILIDADES
+# =============================================================================
+def set_debug_mode(enabled: bool = True):
+    """
+    Activa/desactiva el modo debug para ver requests detallados
+    
+    Args:
+        enabled: True para activar debug, False para desactivar
+    
+    Ejemplo:
+        >>> from adapters.lbank import set_debug_mode
+        >>> set_debug_mode(True)  # Ver todos los requests
+        >>> save_lbank_closed_positions(symbols=["BTC"], days=7, dry_run=True)
+    """
+    global DEBUG_REQUESTS
+    DEBUG_REQUESTS = enabled
+    status = "activado" if enabled else "desactivado"
+    print(f"[LBANK] 🔧 Modo debug {status}")
 
 
 # =============================================================================
@@ -107,6 +168,67 @@ def _get_cached_trading_pairs() -> List[str]:
     except Exception as e:
         print(f"[LBANK CACHE] ⚠️ Error obteniendo cache: {e}")
         return []
+
+
+def add_manual_lbank_pair(symbol: str) -> bool:
+    """
+    Agrega manualmente un trading pair al cache universal
+    
+    Args:
+        symbol: Símbolo a agregar, acepta múltiples formatos:
+                - "JELLYJELLY" → se convierte a jellyjelly_usdt
+                - "jellyjelly" → se convierte a jellyjelly_usdt  
+                - "JELLYJELLY/USDT" → se convierte a jellyjelly_usdt
+                - "jellyjelly_usdt" → se usa tal cual
+    
+    Returns:
+        True si se agregó correctamente, False si hubo error
+    
+    Ejemplo:
+        >>> add_manual_lbank_pair("JELLYJELLY")
+        [LBANK] ✅ Par agregado al cache: jellyjelly_usdt
+        True
+        
+        >>> add_manual_lbank_pair("OP")  
+        [LBANK] ✅ Par agregado al cache: op_usdt
+        True
+    """
+    if not CACHE_AVAILABLE:
+        print("[LBANK] ⚠️ Cache universal no disponible")
+        return False
+    
+    try:
+        # Normalizar el símbolo a formato LBank
+        symbol = symbol.strip().upper()
+        
+        # Quitar /USDT si existe
+        if "/" in symbol:
+            symbol = symbol.split("/")[0]
+        
+        # Quitar _usdt si existe
+        if "_" in symbol:
+            base = symbol.split("_")[0]
+        else:
+            base = symbol
+        
+        # Convertir a formato LBank: lowercase_usdt
+        currency_pair = f"{base.lower()}_usdt"
+        
+        # Agregar al cache
+        init_universal_cache_db()
+        add_to_universal_cache(
+            exchange="lbank",
+            symbol=f"{base}USDT",  # Formato normalizado
+            currency_pair=currency_pair,  # Formato API
+            symbol_type="spot"
+        )
+        
+        print(f"[LBANK] ✅ Par agregado al cache: {currency_pair}")
+        return True
+    
+    except Exception as e:
+        print(f"[LBANK] ❌ Error agregando par: {e}")
+        return False
 
 
 # =============================================================================
@@ -278,7 +400,7 @@ def fetch_lbank_all_balances(api_key: str = None, secret_key: str = None) -> dic
         balances["total_usd"] = 0.0
         
         # ✅ ACTUALIZAR CACHE con los balances
-        _update_cache_from_balances(balances)
+        # _update_cache_from_balances(balances)
         
         return balances
     
@@ -407,12 +529,16 @@ def _fetch_trades(symbol: str = None, start_date: str = None, end_date: str = No
 def _fetch_trades_for_symbol(symbol: str, start_date: str = None, end_date: str = None,
                              days: int = 30) -> List[dict]:
     """
-    Obtiene trades de un símbolo específico
-    Maneja ventanas de 2 días según limitación de LBank
+    Obtiene trades de un símbolo específico usando el SDK de LBank.
+    Maneja ventanas de 1 día.
     """
+    if not LBANK_CLIENT:
+        print("[LBANK] ❌ Cliente SDK no disponible. Imposible obtener trades.")
+        return []
+        
     all_trades = []
     
-    # Si no hay fechas, usar los últimos N días con timezone-aware datetime
+    # ... (La lógica de cálculo de fechas es la misma) ...
     if not end_date:
         end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
@@ -420,33 +546,58 @@ def _fetch_trades_for_symbol(symbol: str, start_date: str = None, end_date: str 
         start = datetime.now(timezone.utc) - timedelta(days=days)
         start_date = start.strftime("%Y-%m-%d")
     
-    # LBank limita a ventanas de 2 días, así que hay que hacer múltiples requests
     current_start = datetime.strptime(start_date, "%Y-%m-%d")
     final_end = datetime.strptime(end_date, "%Y-%m-%d")
     
-    while current_start < final_end:
-        current_end = min(current_start + timedelta(days=1), final_end)
+    print(f"[LBANK TRADES] Buscando {symbol} desde {start_date} hasta {end_date} (vía SDK)")
+
+    while current_start <= final_end:
+        date_str = current_start.strftime("%Y-%m-%d")
         
+        # 🚨 Parámetros para el SDK (usando el endpoint principal)
         params = {
             "symbol": symbol.lower().replace("/", "_"),
-            "startTime": current_start.strftime("%Y-%m-%d"),
-            "endTime": current_end.strftime("%Y-%m-%d"),
-            "limit": "100"  # Máximo por página
+            "startTime": date_str,
+            "endTime": date_str,
+            "limit": "100"
         }
         
         try:
-            trades = _make_signed_request("/v2/supplement/transaction_history.do", params)
+            # 🚀 USANDO EL CLIENTE SDK OFICIAL
+            trades_response = LBANK_CLIENT.http_request(
+                "post", 
+                "v2/transaction_history.do", # Usamos el endpoint principal
+                payload=params
+            )
             
-            if isinstance(trades, list):
-                all_trades.extend(trades)
+            if trades_response.get("result") == True:
+                trades = trades_response.get("data", [])
                 
-                if DEBUG_REQUESTS:
-                    print(f"[LBANK TRADES] {len(trades)} trades de {symbol} desde {current_start.date()} hasta {current_end.date()}")
+                if isinstance(trades, list) and trades:
+                    all_trades.extend(trades)
+                    print(f"[LBANK TRADES] ✅ {len(trades)} trades de {symbol} encontrados en {date_str}")
+                else:
+                    # No hay trades en ese día (respuesta exitosa, lista vacía)
+                    if DEBUG_REQUESTS:
+                        print(f"[LBANK TRADES] ℹ️ {symbol}: No hay trades propios en {date_str}")
+
+            else:
+                # La API devolvió error (e.g., 10008, 10005, etc.)
+                error_code = trades_response.get("error_code", "N/A")
+                error_msg = trades_response.get("msg", "Error desconocido")
+                
+                if error_code == 10008 or error_msg == 'currency pair nonsupport':
+                    if DEBUG_REQUESTS:
+                        print(f"[LBANK TRADES] ⚠️ {symbol}: Sin trades o par no soportado en {date_str} (Error {error_code})")
+                else:
+                    print(f"[LBANK] ❌ Error {error_code} obteniendo trades de {symbol} en {date_str}: {error_msg}")
         
         except Exception as e:
-            print(f"[LBANK] Error obteniendo trades de {symbol}: {e}")
+            print(f"[LBANK] ❌ Excepción al usar SDK para {symbol} en {date_str}: {e}")
         
-        current_start = current_end
+        # Avanzar al siguiente día
+        current_start = current_start + timedelta(days=1)
+        time.sleep(0.3) 
     
     return all_trades
 
@@ -649,12 +800,12 @@ def _finalize_block(block: dict) -> dict:
 
 def save_lbank_closed_positions(db_path: str = "portfolio.db", days: int = 30, 
                                  dry_run: bool = False, api_key: str = None, 
-                                 secret_key: str = None) -> int:
+                                 secret_key: str = None, symbols: List[str] = None) -> int:
     """
     Reconstruye posiciones cerradas desde trades usando FIFO y las guarda en DB
     
-    IMPORTANTE: Primero obtiene los balances para actualizar el cache con los pares.
-    Luego usa el cache para saber qué símbolos consultar.
+    IMPORTANTE: Usa el cache universal para saber qué símbolos consultar.
+    Puedes agregar pares manualmente con add_manual_lbank_pair() o pasarlos directamente.
     
     Args:
         db_path: Ruta a la base de datos SQLite
@@ -662,9 +813,19 @@ def save_lbank_closed_positions(db_path: str = "portfolio.db", days: int = 30,
         dry_run: Si True, solo imprime sin guardar
         api_key: API key de LBank (opcional, usa env var si no se provee)
         secret_key: Secret key de LBank (opcional, usa env var si no se provee)
+        symbols: Lista de símbolos específicos (ej: ["JELLYJELLY", "OP", "ARB"])
+                 Si se proporciona, se agregan al cache automáticamente
+                 Si es None, usa todos los pares del cache existente
     
     Returns:
         Número de posiciones guardadas
+    
+    Ejemplo:
+        >>> # Buscar símbolos específicos
+        >>> save_lbank_closed_positions(symbols=["JELLYJELLY", "OP"], days=30, dry_run=True)
+        
+        >>> # Usar cache existente
+        >>> save_lbank_closed_positions(days=30, dry_run=True)
     """
     global API_KEY, SECRET_KEY
     
@@ -685,21 +846,44 @@ def save_lbank_closed_positions(db_path: str = "portfolio.db", days: int = 30,
         spot_count = len(balances.get("spot", {}))
         print(f"✅ {spot_count} monedas en balance\n")
         
-        # 2. Verificar cache
-        cached_pairs = _get_cached_trading_pairs()
-        if not cached_pairs:
-            print("⚠️  No hay pares en cache después de obtener balances")
-            print("   Esto puede significar que:")
-            print("   - No tienes balances además de BTC/ETH/USDT")
-            print("   - El cache universal no está disponible")
-            return 0
+        # 2. Procesar símbolos específicos o usar cache
+        pairs_to_query = []
         
-        print(f"📦 {len(cached_pairs)} pares en cache:")
-        for pair in cached_pairs[:10]:  # Mostrar primeros 10
-            print(f"   - {pair}")
-        if len(cached_pairs) > 10:
-            print(f"   ... y {len(cached_pairs) - 10} más")
-        print()
+        if symbols:
+            # Modo manual: agregar símbolos al cache y usarlos
+            print(f"📌 Agregando {len(symbols)} símbolos al cache...")
+            for sym in symbols:
+                add_manual_lbank_pair(sym)
+            print()
+            
+            # Obtener los pares recién agregados del cache
+            pairs_to_query = _get_cached_trading_pairs()
+            
+            if not pairs_to_query:
+                print("⚠️  Error: No se pudieron agregar los símbolos al cache")
+                return 0
+                
+            print(f"📦 Usando {len(pairs_to_query)} pares:")
+            for pair in pairs_to_query:
+                print(f"   - {pair}")
+            print()
+        else:
+            # Modo automático: usar cache existente
+            cached_pairs = _get_cached_trading_pairs()
+            if not cached_pairs:
+                print("⚠️  No hay pares en cache")
+                print("   Opciones:")
+                print("   1. Agregar manualmente: add_manual_lbank_pair('JELLYJELLY')")
+                print("   2. Pasar lista: save_lbank_closed_positions(symbols=['JELLYJELLY', 'OP'])")
+                return 0
+            
+            pairs_to_query = cached_pairs
+            print(f"📦 {len(pairs_to_query)} pares en cache:")
+            for pair in pairs_to_query[:10]:
+                print(f"   - {pair}")
+            if len(pairs_to_query) > 10:
+                print(f"   ... y {len(pairs_to_query) - 10} más")
+            print()
         
         # 3. Obtener trades usando el cache
         print("📥 Obteniendo trades históricos de todos los pares...")
@@ -708,6 +892,14 @@ def save_lbank_closed_positions(db_path: str = "portfolio.db", days: int = 30,
         
         if not trades:
             print("⚠️  No hay trades para procesar")
+            print("   Posibles causas:")
+            print("   1. No has hecho trades en estos pares")
+            print("   2. Los trades son más antiguos que la ventana de búsqueda")
+            print("   3. Error 10008 = LBank no tiene datos para estos pares/fechas")
+            print("\n💡 Sugerencia:")
+            print("   - Verifica tus balances: fetch_lbank_all_balances()")
+            print("   - Prueba con pares donde SEPAS que has hecho trades")
+            print("   - Aumenta el período: save_lbank_closed_positions(symbols=[...], days=90)")
             return 0
         
         # 4. Reconstruir posiciones FIFO
@@ -766,16 +958,25 @@ def save_lbank_closed_positions(db_path: str = "portfolio.db", days: int = 30,
 # =============================================================================
 # TESTING RÁPIDO
 # =============================================================================
+# =============================================================================
+# TESTING RÁPIDO
+# =============================================================================
+# =============================================================================
+# TESTING RÁPIDO
+# =============================================================================
 if __name__ == "__main__":
     print("LBank Adapter - Testing")
     print("=" * 60)
+    
+    # Activar debug para ver qué está pasando
+    set_debug_mode(True)
     
     # Test balances
     print("\n1. Testing balances...")
     try:
         balances = fetch_lbank_all_balances()
         print(f"Spot assets: {len(balances['spot'])}")
-        for coin, amount in list(balances['spot'].items())[:5]:
+        for coin, amount in list(balances['spot'].items())[:10]:
             print(f"  {coin}: {amount}")
     except Exception as e:
         print(f"Error: {e}")
@@ -783,6 +984,14 @@ if __name__ == "__main__":
     # Test closed positions (dry run)
     print("\n2. Testing closed positions (dry run)...")
     try:
-        save_lbank_closed_positions(days=7, dry_run=True)
+        # 1. Aumentar 'days' a 15 para encontrar trades de Nov 5
+        # 2. Especificar 'symbols' para poblar el cache
+        symbols_to_test = ["JELLYJELLY"] # <-- CAMBIO: Solo JELLYJELLY
+        
+        save_lbank_closed_positions(
+            symbols=symbols_to_test, 
+            days=15,  # Aumentado para cubrir el 5 de Nov
+            dry_run=True
+        )
     except Exception as e:
         print(f"Error: {e}")

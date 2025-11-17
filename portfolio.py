@@ -26,6 +26,8 @@ from db_manager import init_db, save_closed_position, init_funding_db, upsert_fu
 # En portfoliov7.8.py
 from adapters.gate_spot_trades import save_gate_spot_positions
 from adapters.bitget_spot_trades import save_bitget_spot_positions
+from adapters.xt_spot_trades import save_xt_spot_positions
+
 
 
 from universal_cache import (
@@ -280,16 +282,20 @@ def _get_sync_state(exchange: str, db_path=DB_PATH):
 def _set_sync_state(exchange: str, last_run_ms: int, last_ingested_ms: int | None, db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
-    cur.execute("""
-    INSERT INTO funding_sync_state(exchange, last_run_ms, last_ingested_ms)
-    VALUES(?,?,?)
-    ON CONFLICT(exchange) DO UPDATE SET
-        last_run_ms=excluded.last_run_ms,
-        last_ingested_ms=COALESCE(excluded.last_ingested_ms, funding_sync_state.last_ingested_ms)
-    """, (exchange, last_run_ms, last_ingested_ms))
-    conn.commit(); conn.close()
-    
-    
+    try:
+        cur.execute("""
+        INSERT INTO funding_sync_state(exchange, last_run_ms, last_ingested_ms)
+        VALUES(?,?,?)
+        ON CONFLICT(exchange) DO UPDATE SET
+            last_run_ms=excluded.last_run_ms,
+            last_ingested_ms=COALESCE(excluded.last_ingested_ms, funding_sync_state.last_ingested_ms)
+        """, (exchange, last_run_ms, last_ingested_ms))
+        conn.commit()
+    except Exception as e:
+        print(f"❌ Error en _set_sync_state para {exchange}: {e}")
+        conn.rollback()
+    finally:
+        conn.close()  # <- Asegurar que se cierra
 
 # ===== Cache de exchanges con posiciones abiertas (para gate de funding) =====
 _OPEN_POS_CACHE = {"ts": 0, "exchanges": set()}
@@ -573,7 +579,7 @@ from adapters.whitebit import (
     save_whitebit_closed_positions,
 )
 
-from adapters.xt1 import (
+from adapters.xt import (
     fetch_xt_open_positions,
     fetch_xt_funding_fees,
     fetch_xt_all_balances,
@@ -586,10 +592,11 @@ from adapters.bybit import (
     fetch_bybit_all_balances,
     save_bybit_closed_positions,
 )
-from adapters.lbank import (
+from adapters.lbank_adapter_SDK import (
     fetch_lbank_all_balances,
     save_lbank_closed_positions
 )
+
 
 
 __all__ = [
@@ -824,15 +831,30 @@ def _std_event(exchange: str, ev: dict) -> dict:
         # fallback determinista para evitar duplicados/NULLs
         out["external_id"] = f"{out['exchange']}|{out['symbol']}|{out['timestamp']}|{out['income']}"
     return out
+def db_operation_with_retry(operation_func, max_retries=3, base_delay=0.1):
+    """
+    Ejecuta una operación de BD con retry automático en caso de lock
+    """
+    for attempt in range(max_retries):
+        try:
+            return operation_func()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e) and attempt < max_retries - 1:
+                sleep_time = base_delay * (2 ** attempt)  # Exponential backoff
+                time.sleep(sleep_time)
+                continue
+            else:
+                raise e
+    return None
+
+
 
 def sync_all_funding(exchanges: list | None = None,
-                     force_days: int | None = None,
+                     force_days: int | None = None
+                     ,
                      verbose: bool = True) -> dict:
     """
-    Sincroniza funding:
-      - Si force_days es int: desactiva gate y sincroniza TODOS los exchanges
-        desde now - force_days días (no usa estado previo).
-      - Si force_days es None: modo incremental + gate por actividad, con margen FUNDING_GRACE_HOURS.
+    Sincroniza funding con mejor manejo de errores de base de datos
     """
     now_ms = _ms_now()
     inserted_by_ex = {}
@@ -842,16 +864,12 @@ def sync_all_funding(exchanges: list | None = None,
         target_ex = [e.lower() for e in exchanges]
     else:
         if isinstance(FUNDING_DEFAULT_DAYS, int) and FUNDING_DEFAULT_DAYS > 0:
-            # Si hay valor en el toggle, úsalo como force_days
             force_days = FUNDING_DEFAULT_DAYS
         if isinstance(force_days, int) and force_days > 0:
-            # Modo forzado: todos los exchanges definidos en pullers
             target_ex = sorted(FUNDING_PULLERS.keys())
         else:
-            # Modo normal: gate por actividad
             target_ex = _determine_exchanges_to_sync()
 
-    # 2) Lógica de "desde cuándo" pedir
     grace_ms = FUNDING_GRACE_HOURS * 3600 * 1000
     if isinstance(force_days, int) and force_days > 0:
         since_ms_global = now_ms - force_days * 24 * 3600 * 1000
@@ -883,20 +901,34 @@ def sync_all_funding(exchanges: list | None = None,
                     since_ms = max(since_ms, int(state["last_run_ms"]))
                 since_ms = max(0, since_ms - grace_ms)
 
-            # 3) Llama al adapter con soporte de `since` si puede; si no, filtramos
+            # 3) Llama al adapter
             raw = _call_funding_with_since(FUNDING_PULLERS[ex], since_ms) or []
             raw_ms = [_normalize_ms(r) for r in raw]
             norm = [_std_event(ex, r) for r in raw_ms]
             recent = [e for e in norm if int(e.get("timestamp") or 0) >= since_ms]
 
-            # 4) Inserta
+            # 4) Inserta con retry en caso de lock
             inserted = upsert_funding_events(recent)
             inserted_by_ex[ex] = inserted
 
-            # 5) Actualiza estado
+            # 5) Actualiza estado con manejo de errores
             max_ingested = max([e["timestamp"] for e in recent], default=None)
-            # Siempre dejamos constancia de last_run; last_ingested solo si insertamos algo
-            _set_sync_state(ex, last_run_ms=now_ms, last_ingested_ms=max_ingested)
+            
+            # Intentar actualizar estado con retry
+            success = False
+            for attempt in range(3):  # 3 intentos
+                try:
+                    _set_sync_state(ex, last_run_ms=now_ms, last_ingested_ms=max_ingested)
+                    success = True
+                    break
+                except sqlite3.OperationalError as e:
+                    if "locked" in str(e) and attempt < 2:
+                        time.sleep(0.1 * (attempt + 1))  # Esperar progresivamente
+                        continue
+                    else:
+                        if verbose:
+                            print(f"⚠️ No se pudo actualizar sync_state para {ex}: {e}")
+                        break
 
             if verbose:
                 since_hr = _fmt_ms(since_ms)
@@ -905,8 +937,11 @@ def sync_all_funding(exchanges: list | None = None,
         except Exception as e:
             print(f"❌ Funding sync error {ex}: {e}")
             inserted_by_ex[ex] = 0
-            # Aún así marca last_run para no bloquear futuros ciclos
-            _set_sync_state(ex, last_run_ms=now_ms, last_ingested_ms=None)
+            # Intentar marcar last_run incluso en error
+            try:
+                _set_sync_state(ex, last_run_ms=now_ms, last_ingested_ms=None)
+            except Exception:
+                pass
 
     return inserted_by_ex
 
@@ -1822,8 +1857,8 @@ def main():
     # =====================================================
     spot_sync_functions = {
         "gate":   lambda: save_gate_spot_positions("portfolio.db", days_back=40),
-        # si ya tienes importado save_bitget_spot_positions, puedes activarlo:
-        # "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
+        "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
+        "xt": lambda: save_xt_spot_positions("portfolio.db", days_back=40),
     }
 
     for exchange_name, sync_function in spot_sync_functions.items():
