@@ -1,4 +1,3 @@
-# adapters/mexc.py
 from __future__ import annotations
 import os, time, hmac, hashlib, json, math, sqlite3, re
 from typing import Any, Dict, List, Optional, Tuple
@@ -18,6 +17,10 @@ __all__ = [
     "fetch_mexc_funding_fees",
     "fetch_mexc_all_balances",
     "save_mexc_closed_positions",
+    "_mexc_request", 
+    "_get_mexc_keys",
+    "MEXC_RECV_WINDOW",
+    "MEXC_BASE_URL",
     # util/debug
     # "debug_preview_mexc_closed",
 ]
@@ -31,12 +34,123 @@ __all__ = [
 # )
 # #===========================
 # =========================
-# Config & credenciales
+# Config & creds
 # =========================
-MEXC_BASE_URL = os.getenv("MEXC_BASE_URL", "https://contract.mexc.com")
-MEXC_API_KEY = os.getenv("MEXC_API_KEY", "")
-MEXC_API_SECRET = os.getenv("MEXC_API_SECRET", "")
-MEXC_RECV_WINDOW = os.getenv("MEXC_RECV_WINDOW", "10000")  # ms, <= 60000 recomendado
+
+MEXC_BASE_URL = "https://api.mexc.com"
+MEXC_API_KEY = os.getenv("MEXC_API_KEY")
+MEXC_API_SECRET = os.getenv("MEXC_SECRET")
+
+# Configuración por defecto de recvWindow, recomendado 5000 o menos.
+MEXC_RECV_WINDOW = 10000 
+
+def _get_mexc_keys() -> Tuple[str, str]:
+    """Obtiene y verifica las claves de API de MEXC."""
+    key = MEXC_API_KEY
+    secret = MEXC_API_SECRET
+    if not key or not secret:
+        raise ValueError("MEXC_API_KEY o MEXC_SECRET no están configurados en .env")
+    return key, secret
+
+def _sign_request(secret: str, total_params: str) -> str:
+    """
+    Genera la firma HMAC SHA256 para la solicitud de MEXC.
+    La firma debe estar en minúsculas.
+    """
+    signature = hmac.new(
+        secret.encode('utf-8'),
+        total_params.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+    return signature.lower()
+
+def _mexc_request(
+    method: str, 
+    path: str, 
+    params: Optional[Dict[str, Any]] = None,
+    signed: bool = False, 
+    data: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    Realiza una solicitud HTTP a la API de MEXC, manejando la firma si es necesario.
+    
+    Args:
+        method: Método HTTP (GET, POST, etc.).
+        path: La ruta de la API (ej. /api/v3/spot/order/trades).
+        params: Parámetros a enviar en la query string.
+        signed: Booleano para indicar si la solicitud requiere firma.
+        data: Parámetros a enviar en el cuerpo de la solicitud.
+        headers: Encabezados adicionales.
+        
+    Returns:
+        Respuesta JSON de la API.
+    """
+    
+    url = f"{MEXC_BASE_URL}{path}"
+    req_params = params.copy() if params else {}
+    req_data = data.copy() if data else {}
+    
+    default_headers = {}
+    if headers:
+        default_headers.update(headers)
+        
+    if signed:
+        api_key, secret = _get_mexc_keys()
+        default_headers["X-MEXC-APIKEY"] = api_key
+        
+        # 1. Preparar parámetros para la firma
+        timestamp = str(int(time.time() * 1000))
+        
+        # Combinar todos los parámetros para la firma
+        sign_params = {**req_params, **req_data}
+        sign_params["timestamp"] = timestamp
+        sign_params["recvWindow"] = MEXC_RECV_WINDOW
+        
+        # 2. Generar totalParams: Ordenar alfabéticamente y unir con '&'
+        total_params = urlencode(sign_params)
+        
+        # 3. Generar la firma y agregarla a los parámetros
+        signature = _sign_request(secret, total_params)
+        sign_params["signature"] = signature
+        
+        # 4. Asignar parámetros al lugar correcto
+        if method.upper() in ["GET", "DELETE"]:
+            # Para GET/DELETE, todos los parámetros firmados van en la query string
+            req_params.update(sign_params)
+            req_data = None
+            
+        elif method.upper() in ["POST", "PUT"]:
+            # Para POST/PUT, los parámetros firmados van en el cuerpo (form-urlencoded)
+            default_headers["Content-Type"] = "application/x-www-form-urlencoded"
+            req_data = urlencode(sign_params)
+
+    try:
+        # Petición
+        if method.upper() == "GET":
+            response = requests.get(url, params=req_params, headers=default_headers, timeout=10)
+        elif method.upper() == "POST":
+            response = requests.post(url, params=req_params, data=req_data, headers=default_headers, timeout=10)
+        elif method.upper() == "DELETE":
+            response = requests.delete(url, params=req_params, headers=default_headers, timeout=10)
+        else:
+            raise NotImplementedError(f"Método HTTP no soportado: {method}")
+
+        response.raise_for_status()
+        return response.json()
+        
+    except requests.exceptions.HTTPError as e:
+        error_msg = f"MEXC HTTP Error {response.status_code}"
+        try:
+            error_json = response.json()
+            error_msg += f": {error_json.get('msg', error_json)}"
+        except json.JSONDecodeError:
+            error_msg += f": {response.text}"
+        print(f"❌ {error_msg}")
+        raise Exception(error_msg) from e
+    except requests.exceptions.RequestException as e:
+        print(f"❌ ERROR de Solicitud: {e}")
+        raise Exception(f"Error en la solicitud a MEXC: {e}") from e
 
 # =========================
 # Normalización de símbolo (Regla A)

@@ -5,10 +5,12 @@ import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
 
-DB_PATH = "portfolio.db"
+# SEPARAR DBs: cache en cache.db, posiciones/funding en portfolio.db
+CACHE_DB_PATH = "cache.db"  # NUEVA DB SOLO PARA CACHE
+DB_PATH = "portfolio.db"    # DB ORIGINAL PARA POSICIONES/FUNDING
 
 # TOGGLE CONFIGURABLE - Días de retención del cache
-CACHE_TTL_DAYS = 7  # Puedes cambiar este valor según necesites
+CACHE_TTL_DAYS = 5  # Puedes cambiar este valor según necesites
 
 import re
 
@@ -21,9 +23,9 @@ def _base_symbol(sym: str) -> str:
     s = re.sub(r'[-_/]?PERP$', '', s)
     return s
 
-def init_universal_cache_db():
+def init_universal_cache_db(db_path: str = CACHE_DB_PATH):
     """Inicializa la base de datos para el cache universal"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS universal_cache (
@@ -34,6 +36,7 @@ def init_universal_cache_db():
             symbol_type TEXT DEFAULT 'futures', -- futures, spot, etc.
             last_used TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen INTEGER DEFAULT 0,
             UNIQUE(exchange, symbol)
         )
     """)
@@ -44,48 +47,37 @@ def init_universal_cache_db():
     
     conn.commit()
     conn.close()
-    
-def migrate_universal_cache():
-    """Migra la tabla universal_cache para agregar la columna last_seen si no existe."""
-    conn = sqlite3.connect(DB_PATH)
+
+def migrate_add_last_seen(db_path: str = CACHE_DB_PATH):
+    """Agrega columna last_seen si no existe"""
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     try:
-        # Verifica si la columna existe
         cur.execute("PRAGMA table_info(universal_cache)")
         columns = [row[1] for row in cur.fetchall()]
         
         if "last_seen" not in columns:
-            print("🔧 Migrando universal_cache: agregando columna last_seen...")
+            print("🔧 Agregando columna last_seen...")
+            cur.execute("ALTER TABLE universal_cache ADD COLUMN last_seen INTEGER DEFAULT 0")
             
-            # Agregar columna con valor por defecto (timestamp actual)
-            cur.execute("""
-                ALTER TABLE universal_cache 
-                ADD COLUMN last_seen INTEGER DEFAULT 0
-            """)
-            
-            # Actualizar registros existentes con timestamp actual
+            # Inicializar con timestamp actual
             current_ts = int(time.time())
-            cur.execute("""
-                UPDATE universal_cache 
-                SET last_seen = ? 
-                WHERE last_seen = 0 OR last_seen IS NULL
-            """, (current_ts,))
+            cur.execute("UPDATE universal_cache SET last_seen = ?", (current_ts,))
             
             conn.commit()
-            print(f"✅ Migración completada: {cur.rowcount} registros actualizados")
+            print("✅ Columna last_seen agregada")
         else:
-            print("✅ Columna last_seen ya existe, no se requiere migración")
-            
+            print("✅ Columna last_seen ya existe")
     except Exception as e:
-        print(f"❌ Error en migración: {e}")
+        print(f"❌ Error: {e}")
         conn.rollback()
     finally:
         conn.close()
-
-def cleanup_old_cache():
+        
+def cleanup_old_cache(db_path: str = CACHE_DB_PATH):
     """Limpia cache antiguo según CACHE_TTL_DAYS"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     cutoff_date = datetime.now() - timedelta(days=CACHE_TTL_DAYS)
     cur.execute("DELETE FROM universal_cache WHERE last_used < ?", (cutoff_date,))
@@ -122,11 +114,11 @@ def symbol_to_currency_pair(symbol: str, exchange: str = "gate") -> str:
     # Por defecto, mantener el símbolo original
     return symbol_upper
 
-def update_cache_from_positions(exchange: str, positions: List[Dict[str, Any]]):
+def update_cache_from_positions(exchange: str, positions: List[Dict[str, Any]], db_path: str = CACHE_DB_PATH):
     """Actualiza el cache con las posiciones abiertas de cualquier exchange"""
     print(f"🔄 Actualizando cache universal desde {exchange}...")
     
-    init_universal_cache_db()
+    init_universal_cache_db(db_path)
     cache_updates = 0
     
     for position in positions:
@@ -139,54 +131,60 @@ def update_cache_from_positions(exchange: str, positions: List[Dict[str, Any]]):
     print(f"✅ Cache universal actualizado con {cache_updates} símbolos de {exchange}")
     cleanup_old_cache()
 
-def add_to_universal_cache(exchange: str, symbol: str, currency_pair: str = None, symbol_type: str = "futures"):
+def add_to_universal_cache(exchange: str, symbol: str, currency_pair: str = None, symbol_type: str = "futures", db_path: str = CACHE_DB_PATH):
     """Agrega o actualiza una entrada en el cache universal"""
     if not currency_pair:
         currency_pair = symbol_to_currency_pair(symbol, exchange)
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     try:
         cur.execute("""
             INSERT OR REPLACE INTO universal_cache 
-            (exchange, symbol, currency_pair, symbol_type, last_used)
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        """, (exchange.lower(), symbol, currency_pair, symbol_type))
+            (exchange, symbol, currency_pair, symbol_type, last_used, last_seen)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        """, (exchange.lower(), symbol, currency_pair, symbol_type, int(time.time())))
         conn.commit()
     except Exception as e:
         print(f"❌ Error agregando al cache universal: {e}")
     finally:
         conn.close()
 
-def get_cached_currency_pairs(exchange: str = None) -> List[str]:
-    """Obtiene todos los currency pairs del cache, opcionalmente filtrados por exchange"""
-    conn = sqlite3.connect(DB_PATH)
+def get_cached_currency_pairs(exchange: str = None, db_path: str = CACHE_DB_PATH) -> List[str]:
+    """Obtiene todos los currency pairs del cache"""
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
-    if exchange:
-        cur.execute("SELECT currency_pair FROM universal_cache WHERE exchange = ?", (exchange.lower(),))
-    else:
-        cur.execute("SELECT currency_pair FROM universal_cache")
-    
-    pairs = [row[0] for row in cur.fetchall()]
-    
-    # Actualizar last_used para los pairs obtenidos
-    if pairs:
-        placeholders = ','.join(['?'] * len(pairs))
+    try:
         if exchange:
-            cur.execute(f"UPDATE universal_cache SET last_used = CURRENT_TIMESTAMP WHERE currency_pair IN ({placeholders}) AND exchange = ?", 
-                       pairs + [exchange.lower()])
+            cur.execute("SELECT currency_pair FROM universal_cache WHERE exchange = ?", (exchange.lower(),))
         else:
-            cur.execute(f"UPDATE universal_cache SET last_used = CURRENT_TIMESTAMP WHERE currency_pair IN ({placeholders})", pairs)
-        conn.commit()
-    
-    conn.close()
-    return pairs
+            cur.execute("SELECT currency_pair FROM universal_cache")
+        
+        pairs = [row[0] for row in cur.fetchall()]
+        
+        # Actualizar last_used - CON TRANSACCIÓN EXPLÍCITA
+        if pairs:
+            conn.execute("BEGIN IMMEDIATE")
+            placeholders = ','.join(['?'] * len(pairs))
+            if exchange:
+                cur.execute(f"UPDATE universal_cache SET last_used = CURRENT_TIMESTAMP WHERE currency_pair IN ({placeholders}) AND exchange = ?", 
+                           pairs + [exchange.lower()])
+            else:
+                cur.execute(f"UPDATE universal_cache SET last_used = CURRENT_TIMESTAMP WHERE currency_pair IN ({placeholders})", pairs)
+            conn.commit()
+        
+        return pairs
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
-def get_cached_symbols(exchange: str = None) -> List[Dict[str, Any]]:
+def get_cached_symbols(exchange: str = None, db_path: str = CACHE_DB_PATH) -> List[Dict[str, Any]]:
     """Obtiene todos los símbolos del cache con información completa"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     
@@ -207,9 +205,9 @@ def get_cached_symbols(exchange: str = None) -> List[Dict[str, Any]]:
     conn.close()
     return results
 
-def get_currency_pair_for_symbol(exchange: str, symbol: str) -> Optional[str]:
+def get_currency_pair_for_symbol(exchange: str, symbol: str, db_path: str = CACHE_DB_PATH) -> Optional[str]:
     """Obtiene el currency pair para un símbolo específico de un exchange"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     cur.execute("SELECT currency_pair FROM universal_cache WHERE exchange = ? AND symbol = ?", 
@@ -227,9 +225,9 @@ def get_currency_pair_for_symbol(exchange: str, symbol: str) -> Optional[str]:
     conn.close()
     return None
 
-def search_symbols_by_base(base_currency: str, exchange: str = None) -> List[Dict[str, Any]]:
+def search_symbols_by_base(base_currency: str, exchange: str = None, db_path: str = CACHE_DB_PATH) -> List[Dict[str, Any]]:
     """Busca símbolos por currency base (ej: 'BTC' para BTCUSDT, BTC_USDT, etc.)"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     
@@ -255,7 +253,7 @@ def search_symbols_by_base(base_currency: str, exchange: str = None) -> List[Dic
     return results
 
 # Función para agregar manualmente un pair al cache
-def add_manual_pair(exchange: str, symbol: str, currency_pair: str = None, symbol_type: str = "futures"):
+def add_manual_pair(exchange: str, symbol: str, currency_pair: str = None, symbol_type: str = "futures", db_path: str = CACHE_DB_PATH):
     """Agrega manualmente un símbolo al cache universal"""
     if not currency_pair:
         currency_pair = symbol_to_currency_pair(symbol, exchange)
@@ -264,9 +262,9 @@ def add_manual_pair(exchange: str, symbol: str, currency_pair: str = None, symbo
     print(f"✅ Agregado manualmente a cache universal: {exchange} - {symbol} -> {currency_pair}")
 
 # Función para obtener estadísticas del cache
-def get_cache_stats() -> Dict[str, Any]:
+def get_cache_stats(db_path: str = CACHE_DB_PATH) -> Dict[str, Any]:
     """Obtiene estadísticas del cache universal"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     # Total por exchange
@@ -290,11 +288,12 @@ def get_cache_stats() -> Dict[str, Any]:
         "newest_entry": newest,
         "cache_ttl_days": CACHE_TTL_DAYS
     }
+
 ## cache para autoejecutar closed positions
 
 def init_sync_timestamps_table(db_path: str = DB_PATH):
     """Inicializa la tabla de timestamps de sincronización"""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     cur.execute("""
@@ -312,7 +311,7 @@ def init_sync_timestamps_table(db_path: str = DB_PATH):
 
 def update_sync_timestamp(exchange: str, db_path: str = DB_PATH):
     """Registra el timestamp de la última sincronización de cerradas"""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     # Crear tabla si no existe
@@ -336,7 +335,7 @@ def update_sync_timestamp(exchange: str, db_path: str = DB_PATH):
 
 def get_last_sync_timestamp(exchange: str, db_path: str = DB_PATH) -> Optional[int]:
     """Obtiene el timestamp de la última sincronización de cerradas"""
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
     # Crear tabla si no existe (defensivo)
@@ -360,24 +359,20 @@ def get_last_sync_timestamp(exchange: str, db_path: str = DB_PATH) -> Optional[i
     finally:
         conn.commit()
         conn.close()
+
 def detect_closed_positions(exchange: str, current_positions: List[Dict[str, Any]], 
                            db_path: str = DB_PATH) -> set:
     """
     Detecta símbolos que estaban en caché pero ya no están en posiciones actuales
     (posiblemente cerrados)
     """
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=30.0)
     cur = conn.cursor()
     
-    # # Símbolos actuales
-    # current_symbols = set(p.get("symbol", "") for p in current_positions if p.get("symbol"))
-    
-    #nuevo para solucionar problema de detection, normalizar simbolos.
     current_symbols = set()
     for pos in current_positions:
         symbol = (pos.get("symbol") or "").upper()
-        # Normalizar según tu helper _base_symbol
-        normalized = _base_symbol(symbol)  # ← Asegúrate de usar el mismo helper
+        normalized = _base_symbol(symbol)
         current_symbols.add(normalized)
     
     # Símbolos en caché del exchange
@@ -394,19 +389,14 @@ def detect_closed_positions(exchange: str, current_positions: List[Dict[str, Any
     
     return disappeared
 
-# ====fin del codigo para autoejecutar closed positions
 # Código autoejecutable para Spyder
 if __name__ == "__main__":
     print("🚀 Ejecutando demostración del cache universal...")
     print(f"📅 TTL configurado: {CACHE_TTL_DAYS} días")
     
+    # Inicializar y migrar
     init_universal_cache_db()
-    
-    # Agregar algunos ejemplos manualmente
-    # add_manual_pair("gate", "ALPACAUSDT")
-    # add_manual_pair("binance", "BTCUSDT")
-    # add_manual_pair("kucoin", "ETHUSDT")
-    # add_manual_pair("mexc", "SOLUSDT")
+    migrate_add_last_seen()
     
     # Mostrar estadísticas
     stats = get_cache_stats()
@@ -416,20 +406,12 @@ if __name__ == "__main__":
         print(f"   {exchange}: {count} símbolos")
     
     # Mostrar cache actual para Gate
-    gate_pairs = get_cached_currency_pairs("gate")
-    print(f"📦 Cache Gate.io: {len(gate_pairs)} pairs")
-    for pair in gate_pairs:
-        print(f"   - {pair}")
-
-# debug para ver simbolos        
-def get_cached_symbols(exchange: str) -> set:
-    """Devuelve símbolos en cache para un exchange."""
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT symbol FROM universal_cache 
-        WHERE exchange = ? AND last_seen > ?
-    """, (exchange.lower(), int(time.time()) - (CACHE_TTL_DAYS * 86400)))
-    symbols = {row[0] for row in cur.fetchall()}
-    conn.close()
-    return symbols
+    try:
+        gate_pairs = get_cached_currency_pairs("gate")
+        print(f"📦 Cache Gate.io: {len(gate_pairs)} pairs")
+        for pair in gate_pairs[:10]:  # Mostrar solo primeros 10
+            print(f"   - {pair}")
+        if len(gate_pairs) > 10:
+            print(f"   ... y {len(gate_pairs) - 10} más")
+    except Exception as e:
+        print(f"❌ Error mostrando cache Gate: {e}")

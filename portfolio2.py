@@ -27,7 +27,7 @@ from db_manager import init_db, save_closed_position, init_funding_db, upsert_fu
 from adapters.gate_spot_trades import save_gate_spot_positions
 from adapters.bitget_spot_trades import save_bitget_spot_positions
 from adapters.xt_spot_trades import save_xt_spot_positions
-
+from adapters.mexc_spot_trades import save_mexc_spot_positions
 
 
 from universal_cache import (
@@ -82,15 +82,15 @@ def smart_sync_closed_positions(exchange_name: str,
         current_positions = []
     
     # 2. Detectar cambios (posiciones cerradas)
-    disappeared_symbols = detect_closed_positions(exchange_name, current_positions)
+    disappeared_symbols = detect_closed_positions(exchange_name, current_positions, "cache.db")
     # ✅ DEBUG
     print(f"🔍 {exchange_name}:")
     print(f"   📦 Posiciones actuales: {[p.get('symbol') for p in current_positions]}")
-    print(f"   🗄️  Cache tiene: {get_cached_symbols(exchange_name)}")  # Nueva función helper
+    print(f"   🗄️  Cache tiene: {get_cached_symbols(exchange_name, "cache.db")}")  # Nueva función helper
     print(f"   🎯 Detectadas cerradas: {disappeared_symbols}")
     
     # 3. Calcular ventana temporal
-    last_sync_ms = get_last_sync_timestamp(exchange_name)
+    last_sync_ms = get_last_sync_timestamp(exchange_name, "cache.db")
     now_ms = int(time.time() * 1000)
     
     if force_full_sync or last_sync_ms is None:
@@ -136,8 +136,8 @@ def smart_sync_closed_positions(exchange_name: str,
         saved = result if isinstance(result, int) else (result[0] if isinstance(result, tuple) else 0)
         
         # 5. Actualizar timestamps y caché
-        update_sync_timestamp(exchange_name)
-        update_cache_from_positions(exchange_name, current_positions, CACHE_DB_PATH)
+        update_sync_timestamp(exchange_name, "cache.db")
+        update_cache_from_positions(exchange_name, current_positions, "cache.db")
         
         if debug:
             print(f"✅ {exchange_name}: {saved} posiciones guardadas")
@@ -161,7 +161,7 @@ CACHE_DB_PATH = "cache.db"
 # =========================
 # 🎛️ TOGGLES FUNDING
 # =========================
-SYNC_FUNDING_ON_START = True     # Sincroniza funding al arrancar el servidor
+SYNC_FUNDING_ON_START = False     # Sincroniza funding al arrancar el servidor
 SYNC_FUNDING_ON_EMPTY = True     # Si /api/funding no encuentra datos, fuerza una sync
 FUNDING_DEFAULT_DAYS = None     # Días por defecto que devuelve /api/funding
 # =========================
@@ -337,17 +337,17 @@ def _determine_exchanges_to_sync():
 
     active_open = _get_active_exchanges_from_cache()
     active_closed = _exchanges_with_recent_closed()
-    # siempre incluye los marcados “True” en CLOSED_EXCHANGES por si quieres forzar
+    # siempre incluye los marcados "True" en CLOSED_EXCHANGES por si quieres forzar
     forced = {ex for ex, on in CLOSED_EXCHANGES.items() if on}
 
-    # union de activity + forced; si queda vacío, como fallback usa “binance” si existe
+    # union de activity + forced; si queda vacío, como fallback usa "binance" si existe
     result = (active_open | active_closed | forced) & all_ex
     if not result and "binance" in all_ex:
         result = {"binance"}
     return sorted(result)
 
 def _call_funding_with_since(fn, since_ms: int):
-    # intenta pasar since=; si no acepta, llama “a secas” y filtra por timestamp
+    # intenta pasar since=; si no acepta, llama "a secas" y filtra por timestamp
     try:
         return fn(since=since_ms) or []
     except TypeError:
@@ -454,7 +454,7 @@ def p_open_block(exchange: str, symbol: str, qty: float, entry: float, mark: flo
     if total_unsettled is not None:
         print(f"      🧮 Total (API Unsettled): {total_unsettled}")
     if extra_verification and realized_funding is not None:
-        # muestra línea estilo “Verificación: x + y = z” si procede
+        # muestra línea estilo "Verificación: x + y = z" si procede
         z = (unrealized or 0) + (realized_funding or 0)
         print(f"      ✅ Verificación: {unrealized} + {realized_funding} = {z}")
     if notional is not None:
@@ -628,6 +628,7 @@ if not os.path.exists(template_dir):
 
 TEMPLATE_FILE = "indexv2.html" 
 DB_PATH = "portfolio.db"
+CACHE_DB_PATH = "cache.db"
 
 
 
@@ -689,7 +690,6 @@ def main_balances():
     print("🧩 Consulta de balances completada.")
     
 
-
 # ====== Manual Open Positions Cache ======
 from uuid import uuid4
 
@@ -745,7 +745,7 @@ def add_manual_open_to_cache(payload: dict) -> dict:
     MANUAL_OPEN_POS[manual["manual_id"]] = manual
     # Inyectar al cache universal de abiertas para que se vea y empareje
     try:
-        update_cache_from_positions(exchange, [manual])
+        update_cache_from_positions(exchange, [manual], "cache.db")
     except Exception:
         pass
     return manual
@@ -756,8 +756,8 @@ def delete_manual_open(manual_id: str) -> bool:
         return False
     # Saca del cache universal (según cómo lo almacenes; aquí forzamos refresh mínimo)
     try:
-        # Si tienes una función específica para “remove”, úsala. Si no, refresca recalculando.
-        update_cache_from_positions(data["exchange"], [])
+        # Si tienes una función específica para "remove", úsala. Si no, refresca recalculando.
+        update_cache_from_positions(data["exchange"], [], "cache.db")
     except Exception:
         pass
     return True
@@ -1393,7 +1393,6 @@ def index():
 
 
 
-
 @app.route('/api/balances')
 def get_balances():
     balances = []
@@ -1763,7 +1762,7 @@ POSITIONS_FUNCTIONS = {
 def main():
     print("🚀 Iniciando actualización de portfolio.")
     # Inicializar cache universal
-    init_universal_cache_db(CACHE_DB_PATH)
+    init_universal_cache_db()
 
     # ✅ Actualizar cache para TODOS los exchanges que tengan posiciones abiertas
     print("🔄 Actualizando cache universal para todos los exchanges...")
@@ -1773,13 +1772,13 @@ def main():
             try:
                 print(f"   📦 {ex_name.capitalize()}: obteniendo posiciones...")
                 positions = fetch_positions_func()
-                update_cache_from_positions(ex_name, positions, CACHE_DB_PATH)
+                update_cache_from_positions(ex_name, positions, "cache.db")
                 print(f"   ✅ {ex_name.capitalize()}: {len(positions)} posiciones en cache")
             except Exception as e:
                 print(f"   ⚠️ {ex_name.capitalize()}: error - {e}")
     
     # Mostrar estadísticas del cache
-    stats = get_cache_stats()
+    stats = get_cache_stats("cache.db")
     print(f"📊 Cache universal: {stats['total_entries']} símbolos (TTL: {UNIVERSAL_CACHE_TTL_DAYS} días)")
     # =====================================================
     # 🧠 SMART SYNC - Alternativa 3
@@ -1789,7 +1788,7 @@ def main():
     if SMART_SYNC_ENABLED:
         print("🧠 Modo Smart Sync activado")
 
-        # (1) Fuerza un full sync “de arranque” SOLO para Bitget
+        # (1) Fuerza un full sync "de arranque" SOLO para Bitget
         try:
             saved_bitget = smart_sync_closed_positions(
                 "bitget",
@@ -1860,7 +1859,7 @@ def main():
         "gate":   lambda: save_gate_spot_positions("portfolio.db", days_back=40),
         "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
         "xt": lambda: save_xt_spot_positions("portfolio.db", days_back=40),
-    
+        "mexc": lambda: save_mexc_spot_positions(db_path="portfolio.db", days_back=40),
     }
 
     for exchange_name, sync_function in spot_sync_functions.items():
@@ -2013,7 +2012,7 @@ def save_closed_positions_generic(exchange: str, days: int = 30, db_path: str = 
 
     # 2) Actualizar timestamps y caché universal
     try:
-        update_sync_timestamp(exchange)
+        update_sync_timestamp(exchange, "cache.db")
     except Exception:
         pass
 
@@ -2021,7 +2020,7 @@ def save_closed_positions_generic(exchange: str, days: int = 30, db_path: str = 
         fetch_positions = POSITIONS_FUNCTIONS.get(exchange)
         if fetch_positions:
             current_positions = fetch_positions()
-            update_cache_from_positions(exchange, current_positions, CACHE_DB_PATH)
+            update_cache_from_positions(exchange, current_positions, "cache.db")
     except Exception:
         pass
 
@@ -2123,7 +2122,7 @@ def api_closed_load():
             fetch_positions = POSITIONS_FUNCTIONS.get(exchange)
             if fetch_positions:
                 current_positions = fetch_positions()
-                update_cache_from_positions(exchange, current_positions)
+                update_cache_from_positions(exchange, current_positions, "cache.db")
         except Exception:
             pass
 
@@ -2169,7 +2168,7 @@ def api_closed_sync():
                     fetch_positions = POSITIONS_FUNCTIONS.get(ex)
                     if fetch_positions:
                         current_positions = fetch_positions()
-                        update_cache_from_positions(ex, current_positions)
+                        update_cache_from_positions(ex, current_positions, "cache.db")
                 except Exception:
                     pass
 
@@ -2276,9 +2275,7 @@ if __name__ == "__main__":
     # ✅ NUEVO: Inicializar tabla de sync timestamps
     from universal_cache import init_sync_timestamps_table
     init_sync_timestamps_table()
-    # ✅ AGREGAR AQUÍ:
-    from universal_cache import migrate_universal_cache
-    migrate_universal_cache()  # ← Migra la columna last_seen
+
 
     if SYNC_FUNDING_ON_START:
         force = None

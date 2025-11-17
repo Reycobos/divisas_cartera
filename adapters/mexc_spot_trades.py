@@ -68,7 +68,7 @@ def _mexc_spot_request(
     max_retries: int = 3
 ) -> Dict[str, Any]:
     """
-    Cliente HTTP para MEXC Spot API
+    Cliente HTTP para MEXC Spot API - CORREGIDO
     """
     url = f"{MEXC_SPOT_BASE_URL}{endpoint}"
     params = dict(params or {})
@@ -91,10 +91,8 @@ def _mexc_spot_request(
     for attempt in range(1, max_retries + 1):
         try:
             if method.upper() == "GET":
-                # Para GET, parámetros van en query string
-                if params:
-                    url = f"{url}?{urlencode(params)}"
-                response = requests.get(url, headers=headers, timeout=timeout)
+                # CORREGIDO: Usar el parámetro 'params' de requests para evitar duplicación
+                response = requests.get(url, headers=headers, params=params, timeout=timeout)
             else:
                 # Para POST, parámetros van en body
                 response = requests.post(url, headers=headers, data=params, timeout=timeout)
@@ -113,7 +111,7 @@ def _mexc_spot_request(
             print(f"⏰ Timeout en intento {attempt}/{max_retries} para {endpoint}")
             if attempt >= max_retries:
                 raise
-            time.sleep(attempt * 1)  # Backoff progresivo
+            time.sleep(attempt * 1)
         except requests.exceptions.ConnectionError as e:
             print(f"🔌 Connection error en intento {attempt}/{max_retries}: {e}")
             if attempt >= max_retries:
@@ -135,7 +133,7 @@ def get_existing_trade_hashes(db_path: str) -> set:
     
     try:
         cursor.execute("""
-            SELECT exchange, symbol, side, close_time, size 
+            SELECT exchange, symbol, side, open_time, close_time, size 
             FROM closed_positions 
             WHERE exchange = 'mexc' AND side IN ('spotbuy', 'spotsell', 'swapstable')
         """)
@@ -143,8 +141,9 @@ def get_existing_trade_hashes(db_path: str) -> set:
         
         hashes = set()
         for trade in existing_trades:
-            exchange, symbol, side, close_time, size = trade
-            trade_hash = f"{exchange}_{symbol}_{side}_{close_time}_{round(size, 8)}"
+            exchange, symbol, side, open_time, close_time, size = trade
+            # Hash más específico incluyendo open_time y close_time
+            trade_hash = f"{exchange}_{symbol}_{side}_{open_time}_{close_time}_{round(size, 8)}"
             hashes.add(trade_hash)
             
         return hashes
@@ -152,17 +151,42 @@ def get_existing_trade_hashes(db_path: str) -> set:
         conn.close()
 
 def _insert_row(conn: sqlite3.Connection, row: dict):
-    """Inserta una fila en closed_positions"""
+    """Inserta una fila en closed_positions si no existe"""
     cols = [
         'exchange', 'symbol', 'side', 'size', 'entry_price', 'close_price',
         'open_time', 'close_time', 'pnl', 'realized_pnl', 'fee_total',
         'notional', 'ignore_trade'
     ]
     
+    # Verificar si ya existe
+    check_sql = """
+        SELECT COUNT(*) FROM closed_positions 
+        WHERE exchange = ? AND symbol = ? AND side = ? 
+        AND open_time = ? AND close_time = ? AND size = ?
+    """
+    check_vals = (
+        row.get('exchange'), 
+        row.get('symbol'), 
+        row.get('side'),
+        row.get('open_time'), 
+        row.get('close_time'),
+        row.get('size')
+    )
+    
+    cursor = conn.cursor()
+    cursor.execute(check_sql, check_vals)
+    exists = cursor.fetchone()[0] > 0
+    
+    if exists:
+        print(f"   🔄 Posición ya existe (ignorada): {row.get('symbol')} {row.get('side')} {row.get('size')}")
+        return  # Ya existe, no insertar
+    
+    # Insertar si no existe
     sql = f"INSERT INTO closed_positions ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})"
     vals = tuple(row.get(c, 0 if c != 'ignore_trade' else 0) for c in cols)
     
     conn.execute(sql, vals)
+    print(f"   💾 Nueva posición guardada: {row.get('symbol')} {row.get('side')} {row.get('size')}")
 
 # === Data classes ===
 @dataclass
@@ -269,29 +293,34 @@ def _fmt_ms(ms) -> str:
     except Exception:
         return str(ms)
 
+
 def get_symbols_from_cache() -> List[str]:
     """Obtiene símbolos del cache universal"""
     try:
         sys.path.append(BASE_DIR)
-        from universal_cache import get_cached_symbols
+        from universal_cache import get_cached_symbols, init_universal_cache_db
+        
+        # INICIALIZAR LA BASE DE DATOS DEL CACHE PRIMERO
+        init_universal_cache_db()
         
         cached_symbols = get_cached_symbols("mexc")
+        
+        # Si no hay símbolos en cache, usar los por defecto
+        if not cached_symbols:
+            print("⚠️  No hay símbolos en cache, usando símbolos por defecto")
+            return SYMBOLS_DEFAULT
+            
         spot_symbols = []
         
         for symbol_data in cached_symbols:
             symbol = symbol_data.get('symbol', '')
-            symbol_type = symbol_data.get('symbol_type', 'futures')
-            
-            # Filtrar solo símbolos spot o todos si no hay tipo definido
-            if symbol_type == 'spot' or symbol_type == 'futures':
-                # Convertir símbolo de futuros a formato spot si es necesario
-                if '_' in symbol:
-                    # Formato: BTC_USDT -> BTCUSDT
-                    base, quote = symbol.split('_', 1)
-                    spot_symbol = f"{base}{quote}"
-                else:
-                    spot_symbol = symbol
-                
+            # Filtrar solo símbolos spot (sin _)
+            if '_' not in symbol:
+                spot_symbols.append(symbol)
+            else:
+                # Si tiene formato de futuros, convertir a spot
+                base, quote = symbol.split('_', 1)
+                spot_symbol = f"{base}{quote}"
                 spot_symbols.append(spot_symbol)
         
         return list(set(spot_symbols))  # Remover duplicados
@@ -302,7 +331,6 @@ def get_symbols_from_cache() -> List[str]:
     except Exception as e:
         print(f"⚠️  Error obteniendo símbolos del cache: {e}")
         return SYMBOLS_DEFAULT
-
 # === Fetch layer ===
 def fetch_spot_trades_for_symbol(symbol: str, days_back: int = 30, limit: int = 1000, 
                                 existing_hashes: set = None, debug: bool = False) -> List[Fill]:
@@ -351,8 +379,9 @@ def fetch_spot_trades_for_symbol(symbol: str, days_back: int = 30, limit: int = 
             fee = _num(trade.get('commission', 0))
             fee_ccy = (trade.get('commissionAsset') or '').upper()
             
-            # Crear hash único para este trade
-            trade_hash = f"mexc_{pair}_{side}_{ts}_{round(amt, 8)}"
+            # CORREGIDO: Usar el mismo formato que en get_existing_trade_hashes
+            # Para spot, open_time y close_time son iguales (trade individual)
+            trade_hash = f"mexc_{pair}_{side}_{ts}_{ts}_{round(amt, 8)}"
             
             if trade_hash not in existing_hashes:
                 fill = Fill(ts, pair, side, amt, px, fee, fee_ccy)
@@ -361,6 +390,9 @@ def fetch_spot_trades_for_symbol(symbol: str, days_back: int = 30, limit: int = 
                 
                 if debug:
                     print(f"   ➕ Nuevo trade: {side} {amt} {pair} @ {px}")
+            else:
+                if debug:
+                    print(f"   🔄 Trade duplicado (ignorado): {side} {amt} {pair} @ {px}")
         
     except Exception as e:
         print(f"❌ Error descargando {symbol}: {e}")
@@ -369,7 +401,6 @@ def fetch_spot_trades_for_symbol(symbol: str, days_back: int = 30, limit: int = 
             traceback.print_exc()
     
     return all_fills
-
 # === Main processing function ===
 def save_mexc_spot_positions(
     symbols: List[str] = None,
@@ -392,13 +423,14 @@ def save_mexc_spot_positions(
         print("⚠️  No hay símbolos para procesar")
         return 0, 0
     
-    if debug:
-        print(f"🎯 Procesando {len(symbols)} símbolos: {', '.join(symbols)}")
+    print(f"🎯 Procesando {len(symbols)} símbolos")
     
     existing_hashes = get_existing_trade_hashes(db_path)
     conn = sqlite3.connect(db_path)
     saved = 0
     ignored = 0
+    symbols_with_trades = 0
+    total_trades_found = 0
     
     for symbol in symbols:
         if debug:
@@ -407,16 +439,23 @@ def save_mexc_spot_positions(
             print(f"{'='*60}")
         
         fills = fetch_spot_trades_for_symbol(symbol, days_back, 1000, existing_hashes, debug)
+        total_trades_found += len(fills)
         
         if not fills:
             if debug:
                 print(f"   Sin trades nuevos para {symbol}")
             continue
         
+        symbols_with_trades += 1
+        print(f"✅ {symbol}: {len(fills)} trades encontrados")
+        
         # Procesamiento FIFO (igual que antes)
         by_pair = defaultdict(list)
         for f in fills:
             by_pair[f.pair].append(f)
+        
+        symbol_saved = 0
+        symbol_ignored = 0
         
         for pair, trades in by_pair.items():
             base, quote = _split_pair(pair)
@@ -459,6 +498,7 @@ def save_mexc_spot_positions(
                     }
                     _insert_row(conn, row)
                     saved += 1
+                    symbol_saved += 1
                 continue
             
             # FIFO para tokens normales
@@ -486,6 +526,7 @@ def save_mexc_spot_positions(
                 }
                 _insert_row(conn, row)
                 ignored += 1
+                symbol_ignored += 1
                 idx += 1
                 
                 if debug:
@@ -501,7 +542,7 @@ def save_mexc_spot_positions(
             sells_occurred = False
             
             def _flush_round():
-                nonlocal saved, round_agg, round_started, total_qty_in_round, peak_inventory_base
+                nonlocal saved, symbol_saved, round_agg, round_started, total_qty_in_round, peak_inventory_base
                 if not round_started or not round_agg.is_valid():
                     return
                 
@@ -517,6 +558,7 @@ def save_mexc_spot_positions(
                 }
                 _insert_row(conn, row)
                 saved += 1
+                symbol_saved += 1
                 
                 if debug:
                     print(f"   ✅ Ronda cerrada: {data['size']:.4f} {base}, PnL: {data['realized_pnl']:.2f} USDT")
@@ -604,20 +646,30 @@ def save_mexc_spot_positions(
                     }
                     _insert_row(conn, row)
                     ignored += 1
+                    symbol_ignored += 1
                     
                     if debug:
                         print(f"   ⚠️  Posición abierta ignorada: {rem_base:.4f} {base}")
+        
+        if symbol_saved > 0 or symbol_ignored > 0:
+            print(f"   📊 {symbol}: {symbol_saved} guardadas, {symbol_ignored} ignoradas")
     
     conn.commit()
     conn.close()
     
-    if debug:
-        print(f"\n{'='*60}")
-        print(f"✅ MEXC Spot FIFO completado: guardadas={saved}, ignoradas={ignored}")
-        print(f"{'='*60}")
+    # RESUMEN FINAL
+    print(f"\n{'='*60}")
+    if symbols_with_trades > 0:
+        print(f"✅ MEXC Spot FIFO COMPLETADO:")
+        print(f"   📈 Símbolos con trades: {symbols_with_trades}")
+        print(f"   🔢 Trades encontrados: {total_trades_found}")
+        print(f"   💾 Posiciones guardadas: {saved}")
+        print(f"   ⚠️  Posiciones ignoradas: {ignored}")
+    else:
+        print(f"ℹ️  No se encontraron trades nuevos en MEXC Spot")
+    print(f"{'='*60}")
     
     return saved, ignored
-
 # === CLI ===
 if __name__ == '__main__':
     import argparse
