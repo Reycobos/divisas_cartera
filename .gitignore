@@ -5,6 +5,7 @@ debug/
 paradex_raw_dumps/
 Old files/
 new app/
+lbank/
 
 # === ARCHIVOS DE CONFIGURACIÓN SENSIBLES ===
 .env
