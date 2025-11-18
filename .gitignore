@@ -4,6 +4,7 @@ tests/
 debug/
 paradex_raw_dumps/
 Old files/
+new app/
 
 # === ARCHIVOS DE CONFIGURACIÓN SENSIBLES ===
 .env
@@ -37,3 +38,16 @@ ourbit_manual.py
 parcheformatoslbank.py
 adapters/hyperliquidv5.py
 adapters/hyperliquidv4s.py
+indexv2.html
+portfolio2_copia.py
+
+
+# === Archivos Lbank
+adapters/lbanktest.py
+adapters/lbank_adapter.py
+adapters/lbank_adapter_sdk.py
+adapters/lbank_adapter_SDKNOSIRVE.PYTHON
+adapters/lbankdebugrequest.py
+adapters/lbankdiagnostic.py
+adapters/lbank.pairs.py
+adapters/lbanktrade.py

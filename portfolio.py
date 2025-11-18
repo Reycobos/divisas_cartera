@@ -12,145 +12,166 @@ import base64
 import nacl.signing
 import datetime
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import json, urllib
 from base64 import urlsafe_b64encode
 from base58 import b58decode, b58encode
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from requests import Request, Session
 from collections import defaultdict
-from datetime import datetime, timedelta
-from collections import defaultdict
 import sqlite3
-from db_manager import init_db, save_closed_position, init_funding_db, upsert_funding_events, last_funding_ts, load_funding
+from db_manager import (
+    init_db,
+    save_closed_position,
+    init_funding_db,
+    upsert_funding_events,
+    last_funding_ts,
+    load_funding,
+)
+
 # En portfoliov7.8.py
 from adapters.gate_spot_trades import save_gate_spot_positions
 from adapters.bitget_spot_trades import save_bitget_spot_positions
 from adapters.xt_spot_trades import save_xt_spot_positions
-
+from adapters.mexc_spot_trades import save_mexc_spot_positions
 
 
 from universal_cache import (
-    init_universal_cache_db, 
+    init_universal_cache_db,
     update_cache_from_positions,
-    get_cache_stats, 
+    get_cache_stats,
     add_manual_pair,
     update_sync_timestamp,
     get_last_sync_timestamp,
     detect_closed_positions,
-    get_cached_symbols
+    get_cached_symbols,
 )
 
 
-    
-#==== codigo para sincronizar con universal_cache    
+# ==== codigo para sincronizar con universal_cache
 # TOGGLE para activar sync inteligente
 
 
 SMART_SYNC_ENABLED = True
 SMART_SYNC_LOOKBACK_HOURS = 48  # Ventana de seguridad: siempre mira 48h atrás mínimo
-SMART_SYNC_MAX_DAYS = 60        # Límite superior para evitar llamadas masivas
+SMART_SYNC_MAX_DAYS = 60  # Límite superior para evitar llamadas masivas
 
-def smart_sync_closed_positions(exchange_name: str, 
-                                force_full_sync: bool = False,
-                                debug: bool = False) -> int:
+
+def smart_sync_closed_positions(
+    exchange_name: str, force_full_sync: bool = False, debug: bool = False
+) -> int:
     """
     Sincroniza posiciones cerradas de forma inteligente:
     - Si detecta posición cerrada → sync desde last_sync con ventana de seguridad
     - Si force_full_sync=True → sync completo (ignora caché)
     - Si es primera vez → sync de SMART_SYNC_MAX_DAYS días
-    
+
     Retorna: número de posiciones guardadas
     """
-    
+
     if not should_sync(exchange_name):
         if debug:
             print(f"⏭️  {exchange_name} deshabilitado en CLOSED_EXCHANGES")
         return 0
-    
+
     # 1. Obtener posiciones abiertas actuales
     try:
         fetch_positions = POSITIONS_FUNCTIONS.get(exchange_name)
         if not fetch_positions:
             print(f"⚠️  No hay función de posiciones para {exchange_name}")
             return 0
-            
+
         current_positions = fetch_positions()
-        
+
     except Exception as e:
         print(f"⚠️  Error obteniendo posiciones abiertas de {exchange_name}: {e}")
         current_positions = []
-    
+
     # 2. Detectar cambios (posiciones cerradas)
-    disappeared_symbols = detect_closed_positions(exchange_name, current_positions)
+    disappeared_symbols = detect_closed_positions(
+        exchange_name, current_positions, "cache.db"
+    )
     # ✅ DEBUG
     print(f"🔍 {exchange_name}:")
     print(f"   📦 Posiciones actuales: {[p.get('symbol') for p in current_positions]}")
-    print(f"   🗄️  Cache tiene: {get_cached_symbols(exchange_name)}")  # Nueva función helper
+    print(
+        f"   🗄️  Cache tiene: {get_cached_symbols(exchange_name, "cache.db")}"
+    )  # Nueva función helper
     print(f"   🎯 Detectadas cerradas: {disappeared_symbols}")
-    
+
     # 3. Calcular ventana temporal
-    last_sync_ms = get_last_sync_timestamp(exchange_name)
+    last_sync_ms = get_last_sync_timestamp(exchange_name, "cache.db")
     now_ms = int(time.time() * 1000)
-    
+
     if force_full_sync or last_sync_ms is None:
         # Sync completo
         days_to_sync = UNIVERSAL_CACHE_TTL_DAYS
         reason = "primera vez" if last_sync_ms is None else "forzado"
         if debug:
             print(f"🔄 {exchange_name}: Sync completo ({reason}) - {days_to_sync} días")
-    
+
     elif disappeared_symbols:
         # Hay posiciones cerradas detectadas → sync desde last_sync con buffer
-        lookback_ms = FUNDING_GRACE_HOURS * 3600 * 1000  # Reutilizamos el toggle de funding
+        lookback_ms = (
+            FUNDING_GRACE_HOURS * 3600 * 1000
+        )  # Reutilizamos el toggle de funding
         since_ms = max(0, last_sync_ms - lookback_ms)
         days_to_sync = min(
-            int((now_ms - since_ms) / (24 * 3600 * 1000)) + 1,
-            UNIVERSAL_CACHE_TTL_DAYS
+            int((now_ms - since_ms) / (24 * 3600 * 1000)) + 1, UNIVERSAL_CACHE_TTL_DAYS
         )
-        
+
         if debug:
-            print(f"🎯 {exchange_name}: Detectadas {len(disappeared_symbols)} posiciones cerradas")
+            print(
+                f"🎯 {exchange_name}: Detectadas {len(disappeared_symbols)} posiciones cerradas"
+            )
             print(f"   Símbolos: {', '.join(list(disappeared_symbols)[:5])}")
             print(f"   Sync desde: {_fmt_ms(since_ms)} ({days_to_sync} días)")
-    
+
     else:
         # No hay cambios → skip
         if debug:
             print(f"✅ {exchange_name}: Sin cambios detectados, skip sync")
         return 0
-    
+
     # 4. Ejecutar sync con la función del adapter
     # ⚠️ CORRECCIÓN: usar el diccionario global SYNC_FUNCTIONS (sin 's' extra)
     sync_fn = SYNC_FUNCTIONS.get(exchange_name)  # ← Variable local con nombre diferente
     if not sync_fn:
         print(f"⚠️  No hay función de sync para {exchange_name}")
         return 0
-    
+
     try:
         if debug:
             print(f"⏳ Sincronizando {exchange_name} ({days_to_sync} días)...")
-        
+
         # Llamar con el parámetro days calculado
-        result = sync_fn(days=days_to_sync)  # ← Usar sync_fn (local), no sync_functions (global)
-        saved = result if isinstance(result, int) else (result[0] if isinstance(result, tuple) else 0)
-        
+        result = sync_fn(
+            days=days_to_sync
+        )  # ← Usar sync_fn (local), no sync_functions (global)
+        saved = (
+            result
+            if isinstance(result, int)
+            else (result[0] if isinstance(result, tuple) else 0)
+        )
+
         # 5. Actualizar timestamps y caché
-        update_sync_timestamp(exchange_name)
-        update_cache_from_positions(exchange_name, current_positions, CACHE_DB_PATH)
-        
+        update_sync_timestamp(exchange_name, "cache.db")
+        update_cache_from_positions(exchange_name, current_positions, "cache.db")
+
         if debug:
             print(f"✅ {exchange_name}: {saved} posiciones guardadas")
-        
+
         return saved
-        
+
     except Exception as e:
         print(f"❌ Error en sync de {exchange_name}: {e}")
         import traceback
+
         traceback.print_exc()
         return 0
-    
-#==== fin del codigo para sincronizar con universal_cache    
+
+
+# ==== fin del codigo para sincronizar con universal_cache
 # Configuración
 SPOT_TRADE_ALL = True
 SPOT_TRADE_EXCHANGES = {"gate": True}
@@ -161,14 +182,14 @@ CACHE_DB_PATH = "cache.db"
 # =========================
 # 🎛️ TOGGLES FUNDING
 # =========================
-SYNC_FUNDING_ON_START = True     # Sincroniza funding al arrancar el servidor
-SYNC_FUNDING_ON_EMPTY = True     # Si /api/funding no encuentra datos, fuerza una sync
-FUNDING_DEFAULT_DAYS = None     # Días por defecto que devuelve /api/funding
+SYNC_FUNDING_ON_START = False  # Sincroniza funding al arrancar el servidor
+SYNC_FUNDING_ON_EMPTY = True  # Si /api/funding no encuentra datos, fuerza una sync
+FUNDING_DEFAULT_DAYS = None  # Días por defecto que devuelve /api/funding
 # =========================
-FUNDING_GRACE_HOURS = 36          # margen de seguridad desde la última ejecución
-FUNDING_GATE_ACTIVITY = True     # solo sincronizar exchanges “activos”
-FUNDING_ACTIVE_WINDOW_DAYS = 7   # si hubo cerradas en estos días, consideramos activo
-FUNDING_CACHE_TTL_SEC = 300      # cache de open positions (5 min)
+FUNDING_GRACE_HOURS = 36  # margen de seguridad desde la última ejecución
+FUNDING_GATE_ACTIVITY = True  # solo sincronizar exchanges “activos”
+FUNDING_ACTIVE_WINDOW_DAYS = 7  # si hubo cerradas en estos días, consideramos activo
+FUNDING_CACHE_TTL_SEC = 300  # cache de open positions (5 min)
 
 UNIVERSAL_CACHE_TTL_DAYS = 7  # TOGGLE CONFIGURABLE
 
@@ -178,7 +199,7 @@ UNIVERSAL_CACHE_TTL_DAYS = 7  # TOGGLE CONFIGURABLE
 CLOSED_ALL = True
 CLOSED_EXCHANGES = {
     "backpack": False,
-    "aden": False, 
+    "aden": False,
     "bingx": False,
     "aster": False,
     "binance": False,
@@ -193,8 +214,10 @@ CLOSED_EXCHANGES = {
     "whitebit": False,
     "xt": False,
     "bybit": False,
-    "lbank": False
+    "lbank": False,
 }
+
+
 # Cambia a True solo los exchanges que quieres sincronizar
 # Función helper para verificar si un exchange debe sincronizarse
 def should_sync(exchange_name):
@@ -221,17 +244,21 @@ BALANCE_EXCHANGES = {
     "whitebit": False,
     "xt": False,
     "bybit": True,
-    "lbank": True
+    "lbank": True,
 }
 
 # =========================
 # 🎛️ TOGGLES DE PRINT
 # =========================
-PRINT_CLOSED_SYNC = True        # 1) Sincronización de posiciones cerradas (inicio/fin por exchange)
-PRINT_CLOSED_DEBUG = True       # 2) Debug "bonito" de normalización de posiciones cerradas
-PRINT_OPEN_POSITIONS = False     # 3) Posiciones abiertas (resumen por exchange + bloques por símbolo)
-PRINT_FUNDING = True            # 4) Funding: solo # de registros por exchange
-PRINT_BALANCES = False           # 5) Balances: solo equity total por exchange
+PRINT_CLOSED_SYNC = (
+    True  # 1) Sincronización de posiciones cerradas (inicio/fin por exchange)
+)
+PRINT_CLOSED_DEBUG = True  # 2) Debug "bonito" de normalización de posiciones cerradas
+PRINT_OPEN_POSITIONS = (
+    False  # 3) Posiciones abiertas (resumen por exchange + bloques por símbolo)
+)
+PRINT_FUNDING = True  # 4) Funding: solo # de registros por exchange
+PRINT_BALANCES = False  # 5) Balances: solo equity total por exchange
 
 
 # Configuración
@@ -240,10 +267,10 @@ SPOT_TRADE_EXCHANGES = {
     "gate": True,
     "lbank": True,
     "bitget": True,
-    
 }
-#============== Helper para formatear tiempos a horas legibles
+# ============== Helper para formatear tiempos a horas legibles
 from datetime import datetime, timezone
+
 
 def _fmt_ms(ms) -> str:
     """Convierte ms/seg a 'YYYY-MM-DD HH:MM:SS UTC'."""
@@ -251,46 +278,63 @@ def _fmt_ms(ms) -> str:
         ms = int(ms or 0)
         if ms and ms < 1_000_000_000_000:  # venía en segundos
             ms *= 1000
-        return datetime.fromtimestamp(ms/1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     except Exception:
         return str(ms)
-    
-#============== Helper para formatear tiempos a horas legibles
 
-#======= Nuevo sistema de funding , a partit de version 7.3
+
+# ============== Helper para formatear tiempos a horas legibles
+
+
+# ======= Nuevo sistema de funding , a partit de version 7.3
 # ===== Estado de sincronización funding (por exchange) =====
 def _init_funding_sync_state(db_path=DB_PATH):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
     CREATE TABLE IF NOT EXISTS funding_sync_state (
         exchange TEXT PRIMARY KEY,
         last_run_ms INTEGER,
         last_ingested_ms INTEGER
     )
-    """)
+    """
+    )
     conn.commit()
     conn.close()
 
+
 def _get_sync_state(exchange: str, db_path=DB_PATH):
-    conn = sqlite3.connect(db_path); conn.row_factory = sqlite3.Row
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    cur.execute("SELECT last_run_ms, last_ingested_ms FROM funding_sync_state WHERE exchange=?", (exchange,))
+    cur.execute(
+        "SELECT last_run_ms, last_ingested_ms FROM funding_sync_state WHERE exchange=?",
+        (exchange,),
+    )
     row = cur.fetchone()
     conn.close()
     return dict(row) if row else {"last_run_ms": None, "last_ingested_ms": None}
 
-def _set_sync_state(exchange: str, last_run_ms: int, last_ingested_ms: int | None, db_path=DB_PATH):
+
+def _set_sync_state(
+    exchange: str, last_run_ms: int, last_ingested_ms: int | None, db_path=DB_PATH
+):
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
     try:
-        cur.execute("""
+        cur.execute(
+            """
         INSERT INTO funding_sync_state(exchange, last_run_ms, last_ingested_ms)
         VALUES(?,?,?)
         ON CONFLICT(exchange) DO UPDATE SET
             last_run_ms=excluded.last_run_ms,
             last_ingested_ms=COALESCE(excluded.last_ingested_ms, funding_sync_state.last_ingested_ms)
-        """, (exchange, last_run_ms, last_ingested_ms))
+        """,
+            (exchange, last_run_ms, last_ingested_ms),
+        )
         conn.commit()
     except Exception as e:
         print(f"❌ Error en _set_sync_state para {exchange}: {e}")
@@ -298,12 +342,15 @@ def _set_sync_state(exchange: str, last_run_ms: int, last_ingested_ms: int | Non
     finally:
         conn.close()  # <- Asegurar que se cierra
 
+
 # ===== Cache de exchanges con posiciones abiertas (para gate de funding) =====
 _OPEN_POS_CACHE = {"ts": 0, "exchanges": set()}
+
 
 def _update_open_pos_cache(ex_list: set):
     _OPEN_POS_CACHE["ts"] = int(time.time())
     _OPEN_POS_CACHE["exchanges"] = set(e.lower() for e in ex_list)
+
 
 def _get_active_exchanges_from_cache():
     now = int(time.time())
@@ -314,19 +361,24 @@ def _get_active_exchanges_from_cache():
 
 def _exchanges_with_recent_closed(days=FUNDING_ACTIVE_WINDOW_DAYS, db_path=DB_PATH):
     try:
-        cutoff = int(time.time()) - days*24*3600
-        conn = sqlite3.connect(db_path); conn.row_factory = sqlite3.Row
+        cutoff = int(time.time()) - days * 24 * 3600
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
             SELECT DISTINCT LOWER(exchange) AS ex
             FROM closed_positions
             WHERE COALESCE(close_time, open_time, 0) >= ?
-        """, (cutoff,))
+        """,
+            (cutoff,),
+        )
         rows = [r["ex"] for r in cur.fetchall()]
         conn.close()
         return set(rows)
     except Exception:
         return set()
+
 
 def _determine_exchanges_to_sync():
     # punto de partida: todos los pullers
@@ -337,17 +389,18 @@ def _determine_exchanges_to_sync():
 
     active_open = _get_active_exchanges_from_cache()
     active_closed = _exchanges_with_recent_closed()
-    # siempre incluye los marcados “True” en CLOSED_EXCHANGES por si quieres forzar
+    # siempre incluye los marcados "True" en CLOSED_EXCHANGES por si quieres forzar
     forced = {ex for ex, on in CLOSED_EXCHANGES.items() if on}
 
-    # union de activity + forced; si queda vacío, como fallback usa “binance” si existe
+    # union de activity + forced; si queda vacío, como fallback usa "binance" si existe
     result = (active_open | active_closed | forced) & all_ex
     if not result and "binance" in all_ex:
         result = {"binance"}
     return sorted(result)
 
+
 def _call_funding_with_since(fn, since_ms: int):
-    # intenta pasar since=; si no acepta, llama “a secas” y filtra por timestamp
+    # intenta pasar since=; si no acepta, llama "a secas" y filtra por timestamp
     try:
         return fn(since=since_ms) or []
     except TypeError:
@@ -359,7 +412,8 @@ def _call_funding_with_since(fn, since_ms: int):
                 res.append(e)
         return res
 
-#======= Fin del Nuevo sistema de funding , a partit de version 7.3
+
+# ======= Fin del Nuevo sistema de funding , a partit de version 7.3
 # =========================
 # =========================
 # 🧩 HELPERS DE FORMATO
@@ -378,7 +432,7 @@ def _ex_disp(name: str) -> str:
         "mexc": "MEXC",
         "bitget": "Bitget",
         "okx": "OKX",
-        "paradex":"Paradex",
+        "paradex": "Paradex",
         "hyperliquid": "Hyperliquid",
         "whitebit": "Whitebit",
         "xt": "XT",
@@ -386,63 +440,89 @@ def _ex_disp(name: str) -> str:
     }
     return mapping.get((name or "").lower(), name)
 
+
 # ========== 1) CERRADAS: SINCRONIZACIÓN ==========
 def p_closed_sync_start(exchange: str):
     if PRINT_CLOSED_SYNC:
         print(f"⏳ Sincronizando fills cerrados de {_ex_disp(exchange)}...")
 
+
 def p_closed_sync_saved(exchange: str, saved: int, dup: int):
     if PRINT_CLOSED_SYNC:
         # Mensaje uniforme para todos
-        print(f"✅ Guardadas {saved} posiciones cerradas de {_ex_disp(exchange)} (omitidas {dup} duplicadas).")
+        print(
+            f"✅ Guardadas {saved} posiciones cerradas de {_ex_disp(exchange)} (omitidas {dup} duplicadas)."
+        )
+
 
 def p_closed_sync_done(exchange: str):
     if PRINT_CLOSED_SYNC:
-        print(f"✅ Posiciones cerradas de {_ex_disp(exchange)} actualizadas correctamente.")
+        print(
+            f"✅ Posiciones cerradas de {_ex_disp(exchange)} actualizadas correctamente."
+        )
+
 
 def p_closed_sync_none(exchange: str):
     if PRINT_CLOSED_SYNC:
         # Para los casos "no hay resultados"
         print(f"⚠️ No se obtuvieron posiciones cerradas de {_ex_disp(exchange)}.")
 
+
 # ========== 2) CERRADAS: DEBUG BONITO ==========
 def p_closed_debug_header(symbol: str):
     if PRINT_CLOSED_DEBUG:
         print(f"🔎 {symbol.upper()}")
 
+
 def p_closed_debug_count(n: int):
     if PRINT_CLOSED_DEBUG:
         print(f"📦 DEBUG: Se recibieron {n} registros de posiciones cerradas")
+
 
 def p_closed_debug_norm_size(side: str, size: float):
     if PRINT_CLOSED_DEBUG:
         print(f"   📏 Size: {size:.4f} | 🎯 Side: {side}")
 
+
 def p_closed_debug_prices(entry: float, close: float):
     if PRINT_CLOSED_DEBUG:
         print(f"   💰 Entry: {entry} | Close: {close}")
 
+
 def p_closed_debug_pnl(pnl: float, fee: float, funding: float):
     if PRINT_CLOSED_DEBUG:
         print(f"   📊 PnL: {pnl} | Fee: {fee} | Funding: {funding}")
+
 
 def p_closed_debug_times(open_raw, close_raw, open_sec, close_sec):
     if PRINT_CLOSED_DEBUG:
         print(f"   ⏰ Open raw: {open_raw} | Close raw: {close_raw}")
         print(f"   ⏰ Open sec: {open_sec} | Close sec: {close_sec}")
 
+
 def p_closed_debug_normalized(symbol: str, pnl: float):
     if PRINT_CLOSED_DEBUG:
         print(f"   ✅ Normalizada: {symbol.upper()} - PnL: {pnl}")
+
 
 # ========== 3) ABIERTAS ==========
 def p_open_summary(exchange: str, count: int):
     if PRINT_OPEN_POSITIONS:
         print(f"📈 {_ex_disp(exchange)}: {count} posiciones abiertas")
 
-def p_open_block(exchange: str, symbol: str, qty: float, entry: float, mark: float,
-                 unrealized: float, realized_funding: float | None, total_unsettled: float | None,
-                 notional: float | None, extra_verification: bool = False):
+
+def p_open_block(
+    exchange: str,
+    symbol: str,
+    qty: float,
+    entry: float,
+    mark: float,
+    unrealized: float,
+    realized_funding: float | None,
+    total_unsettled: float | None,
+    notional: float | None,
+    extra_verification: bool = False,
+):
     if not PRINT_OPEN_POSITIONS:
         return
     print(f"   🔎 {symbol.upper()}")
@@ -454,27 +534,28 @@ def p_open_block(exchange: str, symbol: str, qty: float, entry: float, mark: flo
     if total_unsettled is not None:
         print(f"      🧮 Total (API Unsettled): {total_unsettled}")
     if extra_verification and realized_funding is not None:
-        # muestra línea estilo “Verificación: x + y = z” si procede
+        # muestra línea estilo "Verificación: x + y = z" si procede
         z = (unrealized or 0) + (realized_funding or 0)
         print(f"      ✅ Verificación: {unrealized} + {realized_funding} = {z}")
     if notional is not None:
         print(f"      🏦 Notional: {notional}")
+
 
 # ========== 4) FUNDING ==========
 def p_funding_fetching(exchange: str):
     if PRINT_FUNDING:
         print(f"🔍 DEBUG: Obteniendo FUNDING FEES (USDT) de {_ex_disp(exchange)}...")
 
+
 def p_funding_count(exchange: str, n: int):
     if PRINT_FUNDING:
         print(f"📦 DEBUG: Se recibieron {n} registros de funding")
+
 
 # ========== 5) BALANCES ==========
 def p_balance_equity(exchange: str, equity: float):
     if PRINT_BALANCES:
         print(f"💼 {_ex_disp(exchange)} equity total: {equity:.2f}")
-        
-        
 
 
 # =========== Imports adapters=======
@@ -493,20 +574,20 @@ from adapters.aden import (
     fetch_account_aden,
     save_aden_closed_positions,
     _send_request,
-    )
+)
 
 from adapters.extended import (
     fetch_account_extended,
-    fetch_open_extended_positions, 
+    fetch_open_extended_positions,
     fetch_funding_extended,
-    save_extended_closed_positions
+    save_extended_closed_positions,
 )
 
 from adapters.gate import (
     fetch_gate_open_positions,
     fetch_gate_funding_fees,
     fetch_gate_all_balances,
-    save_gate_closed_positions
+    save_gate_closed_positions,
 )
 
 from adapters.aster import (
@@ -514,13 +595,13 @@ from adapters.aster import (
     pull_funding_aster,
     fetch_account_aster,
     save_aster_closed_positions,
-    )
+)
 
 from adapters.binance import (
     fetch_account_binance,
-    fetch_positions_binance_enriched, 
+    fetch_positions_binance_enriched,
     pull_funding_binance,
-    save_binance_closed_positions
+    save_binance_closed_positions,
 )
 
 from adapters.bingx import (
@@ -547,9 +628,9 @@ from adapters.mexc import (
 
 from adapters.bitget import (
     fetch_bitget_all_balances,
-    fetch_bitget_open_positions, 
+    fetch_bitget_open_positions,
     fetch_bitget_funding_fees,
-    save_bitget_closed_positions
+    save_bitget_closed_positions,
 )
 
 from adapters.okx import (
@@ -560,17 +641,17 @@ from adapters.okx import (
 )
 
 from adapters.paradexv9s import (
-      fetch_paradex_open_positions,
-      fetch_paradex_funding_fees,
-      fetch_paradex_all_balances,
-      save_paradex_closed_positions,
+    fetch_paradex_open_positions,
+    fetch_paradex_funding_fees,
+    fetch_paradex_all_balances,
+    save_paradex_closed_positions,
 )
 
 from adapters.hyperliquidv5 import (
     fetch_hyperliquid_open_positions,
     fetch_hyperliquid_funding_fees,
     fetch_hyperliquid_all_balances,
-    save_hyperliquid_closed_positions
+    save_hyperliquid_closed_positions,
 )
 
 from adapters.whitebit import (
@@ -595,20 +676,24 @@ from adapters.bybit import (
 )
 from adapters.lbank_adapter_SDK import (
     fetch_lbank_all_balances,
-    save_lbank_closed_positions
+    save_lbank_closed_positions,
 )
 
 
-
 __all__ = [
-    "fetch_bingx_all_balances", "fetch_bingx_open_positions", "fetch_funding_bingx", "save_bingx_closed_positions",
+    "fetch_bingx_all_balances",
+    "fetch_bingx_open_positions",
+    "fetch_funding_bingx",
+    "save_bingx_closed_positions",
 ]
 
-#==== funcion para spot trades
+
+# ==== funcion para spot trades
 def should_sync_spot(exchange_name):
     if SPOT_TRADE_ALL:
         return True
     return SPOT_TRADE_EXCHANGES.get(exchange_name, False)
+
 
 # listen_key = get_listen_key()
 # from bingx_ws_listener import start_bingx_ws_listener
@@ -618,18 +703,18 @@ def should_sync_spot(exchange_name):
 app = Flask(__name__)
 
 from api_manual_import import bp_manual_import
+
 app.register_blueprint(bp_manual_import)
 
 # Verificar que la carpeta templates existe
-template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates')
+template_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 if not os.path.exists(template_dir):
     print(f"⚠️ Creando carpeta ss: {template_dir}")
     os.makedirs(template_dir)
 
-TEMPLATE_FILE = "indexv2.html" 
+TEMPLATE_FILE = "indexv2.4.html"
 DB_PATH = "portfolio.db"
-
-
+CACHE_DB_PATH = "cache.db"
 
 
 BYBIT_API_KEY = os.getenv("BYBIT_API_KEY")
@@ -637,40 +722,46 @@ BYBIT_API_SECRET = os.getenv("BYBIT_API_SECRET")
 BYBIT_BASE_URL = "https://api.bybit.com"
 
 
-
-
-
 def should_fetch_balance(exchange_name: str) -> bool:
     """
     Devuelve True si se deben pedir balances para 'exchange_name' según
     la configuración de BALANCE_ALL y BALANCE_EXCHANGES.
     """
-    return bool(BALANCE_ALL or BALANCE_EXCHANGES.get(exchange_name, False))    
+    return bool(BALANCE_ALL or BALANCE_EXCHANGES.get(exchange_name, False))
+
+
 def main_balances():
     print("💰 Iniciando consulta de balances...")
 
     # --- Ejemplo de funciones. Ajusta nombres/args a tu API real ---
     balance_functions = {
         "backpack": lambda: fetch_account_backpack(db_path="portfolio.db"),
-        "aden":     lambda: fetch_account_aden(db_path="portfolio.db", debug=False),
-        "aster":    lambda: fetch_account_aster()(db_path="portfolio.db"),
-        "binance":  lambda: fetch_account_binance(db_path="portfolio.db", spot=True, futures=True),
+        "aden": lambda: fetch_account_aden(db_path="portfolio.db", debug=False),
+        "aster": lambda: fetch_account_aster()(db_path="portfolio.db"),
+        "binance": lambda: fetch_account_binance(
+            db_path="portfolio.db", spot=True, futures=True
+        ),
         "extended": lambda: fetch_account_extended(db_path="portfolio.db"),
         "kucoin": lambda: fetch_kucoin_all_balances(),
-        "gate":     lambda: fetch_gate_all_balances(settles=("usdt",)),
+        "gate": lambda: fetch_gate_all_balances(settles=("usdt",)),
         "bingx": lambda: fetch_bingx_all_balances(),
         "mexc": fetch_mexc_all_balances,
-        "bitget": lambda: fetch_bitget_funding_fees(limit=2000, chunk=100, max_pages=50),
-        "okx":     lambda: fetch_okx_all_balances(db_path="portfolio.db"),
-        "paradex": lambda: fetch_paradex_all_balances(db_path="portfolio.db", days=60, debug=PRINT_CLOSED_DEBUG),
-        "hyperliquid": lambda: fetch_hyperliquid_all_balances("portfolio.db", days=60, debug=False),
+        "bitget": lambda: fetch_bitget_funding_fees(
+            limit=2000, chunk=100, max_pages=50
+        ),
+        "okx": lambda: fetch_okx_all_balances(db_path="portfolio.db"),
+        "paradex": lambda: fetch_paradex_all_balances(
+            db_path="portfolio.db", days=60, debug=PRINT_CLOSED_DEBUG
+        ),
+        "hyperliquid": lambda: fetch_hyperliquid_all_balances(
+            "portfolio.db", days=60, debug=False
+        ),
         "whitebit": lambda: fetch_whitebit_all_balances(),
         "xt": lambda: fetch_xt_all_balances(db_path="portfolio.db"),
         "bybit": lambda: fetch_bybit_all_balances(db_path="portfolio.db"),
         "lbank": lambda: fetch_lbank_all_balances(db_path="portfolio.db"),
-        
     }
-    
+
     # ---------------------------------------------------------------
 
     for exchange_name, fetch_fn in balance_functions.items():
@@ -680,14 +771,17 @@ def main_balances():
                 balances = fetch_fn()
                 # Si tu flujo necesita persistir, hazlo aquí:
                 # save_balances("portfolio.db", exchange=exchange_name, data=balances)
-                print(f"✅ Balances de {exchange_name.capitalize()} obtenidos correctamente.")
+                print(
+                    f"✅ Balances de {exchange_name.capitalize()} obtenidos correctamente."
+                )
             except Exception as e:
-                print(f"❌ Error al pedir balances de {exchange_name.capitalize()}: {e}")
+                print(
+                    f"❌ Error al pedir balances de {exchange_name.capitalize()}: {e}"
+                )
         else:
             print(f"⏭️  Saltando {exchange_name.capitalize()}")
 
     print("🧩 Consulta de balances completada.")
-    
 
 
 # ====== Manual Open Positions Cache ======
@@ -706,16 +800,22 @@ VALID_EXCHANGES_MANUAL = [
     "Solana JUP",
 ]
 
+
 def _now_s():
     import time
+
     return int(time.time())
+
 
 def add_manual_open_to_cache(payload: dict) -> dict:
     # Normaliza entradas. Vacíos quedan como None.
     def _n(x):
-        if x in ("", None): return None
-        try: return float(x)
-        except: return None
+        if x in ("", None):
+            return None
+        try:
+            return float(x)
+        except:
+            return None
 
     side = (payload.get("side") or "").strip().lower()
     exchange = (payload.get("exchange") or "").strip()
@@ -745,10 +845,11 @@ def add_manual_open_to_cache(payload: dict) -> dict:
     MANUAL_OPEN_POS[manual["manual_id"]] = manual
     # Inyectar al cache universal de abiertas para que se vea y empareje
     try:
-        update_cache_from_positions(exchange, [manual])
+        update_cache_from_positions(exchange, [manual], "cache.db")
     except Exception:
         pass
     return manual
+
 
 def delete_manual_open(manual_id: str) -> bool:
     data = MANUAL_OPEN_POS.pop(manual_id, None)
@@ -756,45 +857,55 @@ def delete_manual_open(manual_id: str) -> bool:
         return False
     # Saca del cache universal (según cómo lo almacenes; aquí forzamos refresh mínimo)
     try:
-        # Si tienes una función específica para “remove”, úsala. Si no, refresca recalculando.
-        update_cache_from_positions(data["exchange"], [])
+        # Si tienes una función específica para "remove", úsala. Si no, refresca recalculando.
+        update_cache_from_positions(data["exchange"], [], "cache.db")
     except Exception:
         pass
     return True
-#===============Codigo para insertar funding en base de datos
 
-def _ms_now(): return int(time.time()*1000)
+
+# ===============Codigo para insertar funding en base de datos
+
+
+def _ms_now():
+    return int(time.time() * 1000)
+
 
 def _safe_ts(x):
     x = int(x or 0)
-    return x*1000 if x and x < 1_000_000_000_000 else x
+    return x * 1000 if x and x < 1_000_000_000_000 else x
+
 
 # Mapea cada adapter a una función que devuelva "eventos recientes".
 # Si el adapter no acepta timestamps, usa un limit alto y luego filtramos por ts.
 FUNDING_PULLERS = {
-    "backpack":       lambda: fetch_funding_backpack(limit=500),
-    "aster":          lambda **kw: pull_funding_aster(**kw),
-    "binance":        lambda **kw: pull_funding_binance(**kw),  # tiene income history
-    "aden":           lambda: fetch_funding_aden(limit=500),
-    "extended":       lambda: fetch_funding_extended(limit=500, debug=False),
-    "kucoin":         lambda: fetch_funding_kucoin(limit=500),
-    "mexc":           lambda: fetch_mexc_funding_fees(limit=1000),
-    "gate":           lambda: fetch_gate_funding_fees(limit=1000),
-    "okx":            lambda: fetch_okx_funding_fees(limit=1000),
-    "bitget":         lambda: fetch_bitget_funding_fees(limit=2000, chunk=100, max_pages=200),
-    "bingx":          lambda: fetch_funding_bingx(limit=1000, start_time=_ms_now()-14*24*3600*1000, end_time=_ms_now()),
-    "paradex":        lambda: fetch_paradex_funding_fees(limit=1000),
-    "hyperliquid":    lambda: fetch_hyperliquid_funding_fees(limit=1000),
-    "whitebit":       lambda: fetch_whitebit_funding_fees(limit=1000),
-    "xt":             lambda: fetch_xt_funding_fees(limit=1000),
-    "bybit":          lambda **kw: fetch_bybit_funding_fees(limit=50, **kw),
+    "backpack": lambda: fetch_funding_backpack(limit=500),
+    "aster": lambda **kw: pull_funding_aster(**kw),
+    "binance": lambda **kw: pull_funding_binance(**kw),  # tiene income history
+    "aden": lambda: fetch_funding_aden(limit=500),
+    "extended": lambda: fetch_funding_extended(limit=500, debug=False),
+    "kucoin": lambda: fetch_funding_kucoin(limit=500),
+    "mexc": lambda: fetch_mexc_funding_fees(limit=1000),
+    "gate": lambda: fetch_gate_funding_fees(limit=1000),
+    "okx": lambda: fetch_okx_funding_fees(limit=1000),
+    "bitget": lambda: fetch_bitget_funding_fees(limit=2000, chunk=100, max_pages=200),
+    "bingx": lambda: fetch_funding_bingx(
+        limit=1000, start_time=_ms_now() - 14 * 24 * 3600 * 1000, end_time=_ms_now()
+    ),
+    "paradex": lambda: fetch_paradex_funding_fees(limit=1000),
+    "hyperliquid": lambda: fetch_hyperliquid_funding_fees(limit=1000),
+    "whitebit": lambda: fetch_whitebit_funding_fees(limit=1000),
+    "xt": lambda: fetch_xt_funding_fees(limit=1000),
+    "bybit": lambda **kw: fetch_bybit_funding_fees(limit=50, **kw),
 }
+
 
 def _normalize_ms(ev):
     ev = dict(ev)
     ts = ev.get("timestamp") or ev.get("time") or ev.get("created_at")
     ev["timestamp"] = _safe_ts(ts)
     return ev
+
 
 def _std_event(exchange: str, ev: dict) -> dict:
     """
@@ -825,13 +936,19 @@ def _std_event(exchange: str, ev: dict) -> dict:
     out["timestamp"] = int(out.get("timestamp") or 0)
 
     # external_id robusto
-    eid = out.get("external_id") or out.get("tranId") or out.get("txId") or out.get("id")
+    eid = (
+        out.get("external_id") or out.get("tranId") or out.get("txId") or out.get("id")
+    )
     if eid:
         out["external_id"] = str(eid)
     else:
         # fallback determinista para evitar duplicados/NULLs
-        out["external_id"] = f"{out['exchange']}|{out['symbol']}|{out['timestamp']}|{out['income']}"
+        out["external_id"] = (
+            f"{out['exchange']}|{out['symbol']}|{out['timestamp']}|{out['income']}"
+        )
     return out
+
+
 def db_operation_with_retry(operation_func, max_retries=3, base_delay=0.1):
     """
     Ejecuta una operación de BD con retry automático en caso de lock
@@ -841,7 +958,7 @@ def db_operation_with_retry(operation_func, max_retries=3, base_delay=0.1):
             return operation_func()
         except sqlite3.OperationalError as e:
             if "locked" in str(e) and attempt < max_retries - 1:
-                sleep_time = base_delay * (2 ** attempt)  # Exponential backoff
+                sleep_time = base_delay * (2**attempt)  # Exponential backoff
                 time.sleep(sleep_time)
                 continue
             else:
@@ -849,11 +966,9 @@ def db_operation_with_retry(operation_func, max_retries=3, base_delay=0.1):
     return None
 
 
-
-def sync_all_funding(exchanges: list | None = None,
-                     force_days: int | None = None
-                     ,
-                     verbose: bool = True) -> dict:
+def sync_all_funding(
+    exchanges: list | None = None, force_days: int | None = None, verbose: bool = True
+) -> dict:
     """
     Sincroniza funding con mejor manejo de errores de base de datos
     """
@@ -914,12 +1029,14 @@ def sync_all_funding(exchanges: list | None = None,
 
             # 5) Actualiza estado con manejo de errores
             max_ingested = max([e["timestamp"] for e in recent], default=None)
-            
+
             # Intentar actualizar estado con retry
             success = False
             for attempt in range(3):  # 3 intentos
                 try:
-                    _set_sync_state(ex, last_run_ms=now_ms, last_ingested_ms=max_ingested)
+                    _set_sync_state(
+                        ex, last_run_ms=now_ms, last_ingested_ms=max_ingested
+                    )
                     success = True
                     break
                 except sqlite3.OperationalError as e:
@@ -933,7 +1050,9 @@ def sync_all_funding(exchanges: list | None = None,
 
             if verbose:
                 since_hr = _fmt_ms(since_ms)
-                print(f"🔁 Funding {ex}: recibidos={len(raw)} norm={len(norm)} nuevos={inserted} (since={since_hr})")
+                print(
+                    f"🔁 Funding {ex}: recibidos={len(raw)} norm={len(norm)} nuevos={inserted} (since={since_hr})"
+                )
 
         except Exception as e:
             print(f"❌ Funding sync error {ex}: {e}")
@@ -946,6 +1065,7 @@ def sync_all_funding(exchanges: list | None = None,
 
     return inserted_by_ex
 
+
 # === Crear (Add manual open) ===
 @app.post("/api/open/manual/add")
 def api_open_manual_add():
@@ -956,6 +1076,7 @@ def api_open_manual_add():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 400
 
+
 # === Eliminar (Delete manual open) ===
 @app.post("/api/open/manual/delete")
 def api_open_manual_delete():
@@ -965,6 +1086,7 @@ def api_open_manual_delete():
         return jsonify({"ok": False, "error": "manual_id required"}), 400
     ok = delete_manual_open(manual_id)
     return jsonify({"ok": ok}), (200 if ok else 404)
+
 
 # === Enviar a Closed (Close & save) ===
 @app.post("/api/open/manual/close")
@@ -978,6 +1100,7 @@ def api_open_manual_close():
       fee_total, funding_total, leverage, initial_margin, notional, liquidation_price (opcionales)
     """
     from db_manager import save_closed_position  # usar tu función existente
+
     payload = request.get_json(force=True)
     manual_id = (payload.get("manual_id") or "").strip()
     if not manual_id or manual_id not in MANUAL_OPEN_POS:
@@ -987,9 +1110,12 @@ def api_open_manual_close():
 
     # Cierre: mezcla los datos del manual con lo que viene del modal
     def _n(x):
-        if x in ("", None): return None
-        try: return float(x)
-        except: return None
+        if x in ("", None):
+            return None
+        try:
+            return float(x)
+        except:
+            return None
 
     close_price = _n(payload.get("close_price"))
     if close_price is None:
@@ -1009,17 +1135,43 @@ def api_open_manual_close():
         # Si el usuario provee pnl (price), lo respetamos; si no, que lo calcule save_closed_position
         "pnl": _n(payload.get("pnl")),
         # Hereda/corrige extras si los trae el modal (opcionales)
-        "fee_total": _n(payload.get("fee_total")) if payload.get("fee_total") is not None else src.get("fee_total"),
-        "funding_total": _n(payload.get("funding_total")) if payload.get("funding_total") is not None else src.get("funding_total"),
-        "leverage": _n(payload.get("leverage")) if payload.get("leverage") is not None else src.get("leverage"),
-        "initial_margin": _n(payload.get("initial_margin")) if payload.get("initial_margin") is not None else src.get("initial_margin"),
-        "notional": _n(payload.get("notional")) if payload.get("notional") is not None else src.get("notional"),
-        "liquidation_price": _n(payload.get("liquidation_price")) if payload.get("liquidation_price") is not None else src.get("liquidation_price"),
+        "fee_total": (
+            _n(payload.get("fee_total"))
+            if payload.get("fee_total") is not None
+            else src.get("fee_total")
+        ),
+        "funding_total": (
+            _n(payload.get("funding_total"))
+            if payload.get("funding_total") is not None
+            else src.get("funding_total")
+        ),
+        "leverage": (
+            _n(payload.get("leverage"))
+            if payload.get("leverage") is not None
+            else src.get("leverage")
+        ),
+        "initial_margin": (
+            _n(payload.get("initial_margin"))
+            if payload.get("initial_margin") is not None
+            else src.get("initial_margin")
+        ),
+        "notional": (
+            _n(payload.get("notional"))
+            if payload.get("notional") is not None
+            else src.get("notional")
+        ),
+        "liquidation_price": (
+            _n(payload.get("liquidation_price"))
+            if payload.get("liquidation_price") is not None
+            else src.get("liquidation_price")
+        ),
     }
 
     # Guardar en DB como cerrada
     try:
-        save_closed_position(final)  # calcula apr, pnl%, realized, etc. como de costumbre
+        save_closed_position(
+            final
+        )  # calcula apr, pnl%, realized, etc. como de costumbre
     except Exception as e:
         return jsonify({"ok": False, "error": f"save_closed_position: {e}"}), 500
 
@@ -1028,20 +1180,124 @@ def api_open_manual_close():
 
     return jsonify({"ok": True}), 200
 
-@app.route('/api/funding')
+
+@app.route("/api/funding/open_positions")
+def api_funding_open_positions():
+    """
+    Devuelve funding de d-2, d-1 y hoy para posiciones abiertas.
+    Formato: {exchange: {symbol: {d2: X, d1: Y, today: Z}}}
+    """
+    try:
+        # Obtener posiciones abiertas actuales
+        current_positions = {}
+        for ex_name, fetch_func in POSITIONS_FUNCTIONS.items():
+            try:
+                positions = fetch_func()
+                for pos in positions:
+                    exchange = pos.get("exchange", "").lower()
+                    symbol = pos.get("symbol", "")
+                    if exchange and symbol:
+                        if exchange not in current_positions:
+                            current_positions[exchange] = set()
+                        current_positions[exchange].add(symbol)
+            except:
+                continue
+
+        # Calcular funding para cada posición
+        result = {}
+        now = datetime.now(timezone.utc)
+        d2_start = (now - timedelta(days=2)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        d2_end = (now - timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        d1_start = d2_end
+        d1_end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = d1_end
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+
+        for exchange, symbols in current_positions.items():
+            result[exchange] = {}
+            for symbol in symbols:
+                # d-2
+                cur.execute(
+                    """
+                    SELECT SUM(income) FROM funding_events
+                    WHERE exchange=? AND symbol=? 
+                    AND timestamp >= ? AND timestamp < ?
+                """,
+                    (
+                        exchange,
+                        symbol,
+                        int(d2_start.timestamp() * 1000),
+                        int(d2_end.timestamp() * 1000),
+                    ),
+                )
+                d2 = cur.fetchone()[0] or 0
+
+                # d-1
+                cur.execute(
+                    """
+                    SELECT SUM(income) FROM funding_events
+                    WHERE exchange=? AND symbol=? 
+                    AND timestamp >= ? AND timestamp < ?
+                """,
+                    (
+                        exchange,
+                        symbol,
+                        int(d1_start.timestamp() * 1000),
+                        int(d1_end.timestamp() * 1000),
+                    ),
+                )
+                d1 = cur.fetchone()[0] or 0
+
+                # hoy
+                cur.execute(
+                    """
+                    SELECT SUM(income) FROM funding_events
+                    WHERE exchange=? AND symbol=? 
+                    AND timestamp >= ?
+                """,
+                    (exchange, symbol, int(today_start.timestamp() * 1000)),
+                )
+                today = cur.fetchone()[0] or 0
+
+                result[exchange][symbol] = {
+                    "d2": float(d2),
+                    "d1": float(d1),
+                    "today": float(today),
+                }
+
+        conn.close()
+        return jsonify(result)
+    except Exception as e:
+        print(f"❌ Error in funding_open_positions: {e}")
+        return jsonify({})
+
+
+@app.route("/api/funding")
 def api_funding():
     """Lee funding desde SQLite; si ?refresh=1, sincroniza antes.
-       Si la tabla está vacía y SYNC_FUNDING_ON_EMPTY=True, sincroniza una vez."""
+    Si la tabla está vacía y SYNC_FUNDING_ON_EMPTY=True, sincroniza una vez."""
     try:
         # 1) Forzar sync si se pide (?refresh=1) y, opcionalmente, con días forzados
         force_days_q = request.args.get("days", default=None, type=int)
         if request.args.get("refresh") == "1":
-            sync_all_funding(force_days=force_days_q, verbose=False)  # usa None si no hay número
+            sync_all_funding(
+                force_days=force_days_q, verbose=False
+            )  # usa None si no hay número
 
         # 2) Parse robusto de 'days' (puede venir None/''/'none'/'null' o un número)
         raw_days = request.args.get("days", default=None)
         days = None
-        if raw_days is not None and str(raw_days).strip() != "" and str(raw_days).lower() not in ("none", "null", "false"):
+        if (
+            raw_days is not None
+            and str(raw_days).strip() != ""
+            and str(raw_days).lower() not in ("none", "null", "false")
+        ):
             try:
                 days = int(raw_days)
             except Exception:
@@ -1051,25 +1307,38 @@ def api_funding():
             days = FUNDING_DEFAULT_DAYS
 
         exchange = request.args.get("exchange")
-        symbol   = request.args.get("symbol")
+        symbol = request.args.get("symbol")
         include_estimates = request.args.get("estimates", "1") != "0"
 
-        data = load_funding(days=days, exchange=exchange, symbol=symbol,
-                            include_estimates=include_estimates, limit=10000)
+        data = load_funding(
+            days=days,
+            exchange=exchange,
+            symbol=symbol,
+            include_estimates=include_estimates,
+            limit=10000,
+        )
 
         # Si la tabla está vacía y está activado el auto-sync en vacío, dispara una vez
         if not data and SYNC_FUNDING_ON_EMPTY:
             sync_all_funding(force_days=force_days_q, verbose=False)
-            data = load_funding(days=days, exchange=exchange, symbol=symbol,
-                                include_estimates=include_estimates, limit=10000)
+            data = load_funding(
+                days=days,
+                exchange=exchange,
+                symbol=symbol,
+                include_estimates=include_estimates,
+                limit=10000,
+            )
 
         return jsonify({"funding": data})
     except Exception as e:
         print(f"❌ /api/funding error: {e}")
         return jsonify({"funding": []})
+
+
 # Routers
 
 import re
+
 
 def _base_symbol(sym: str) -> str:
     """
@@ -1080,11 +1349,10 @@ def _base_symbol(sym: str) -> str:
     """
     s = (sym or "").upper()
     # quitar quotes al final (con - o / opcional)
-    s = re.sub(r'[-_/]?(USDT|USDC)$', '', s)
+    s = re.sub(r"[-_/]?(USDT|USDC)$", "", s)
     # quitar sufijo PERP al final
-    s = re.sub(r'[-_/]?PERP$', '', s)
+    s = re.sub(r"[-_/]?PERP$", "", s)
     return s
-
 
 
 @app.route("/api/closed_positions")
@@ -1097,20 +1365,22 @@ def api_closed_positions():
       4) Spots sueltos (spotbuy/spotsell) no emparejados
     """
     try:
-        WINDOW_SEC = 15 * 60       # 15 minutos
-        SIZE_EPS_REL = 0.001       # 0.1%
+        WINDOW_SEC = 15 * 60  # 15 minutos
+        SIZE_EPS_REL = 0.001  # 0.1%
 
         conn = sqlite3.connect("portfolio.db")
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
              SELECT exchange, symbol, side, size, entry_price, close_price, pnl,
                     realized_pnl, funding_total AS funding_fee,
                     fee_total AS fees, pnl_percent, apr, initial_margin, notional, 
                     open_time, close_time
              FROM closed_positions
              ORDER BY open_time ASC
-        """)
+        """
+        )
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
 
@@ -1119,7 +1389,9 @@ def api_closed_positions():
 
         # Clasificación
         futures_trades = [r for r in rows if r["side"] in ("long", "short")]
-        spot_trades    = [r for r in rows if r["side"] in ("spotbuy", "spotsell", "swapstable")]
+        spot_trades = [
+            r for r in rows if r["side"] in ("spotbuy", "spotsell", "swapstable")
+        ]
 
         # Index por base
         def _base_symbol(sym: str) -> str:
@@ -1153,7 +1425,9 @@ def api_closed_positions():
 
         for base, futures in futures_by_base.items():
             short_futures = [f for f in futures if f["side"] == "short"]
-            matching_spot_buys = [s for s in spot_by_base.get(base, []) if s["side"] == "spotbuy"]
+            matching_spot_buys = [
+                s for s in spot_by_base.get(base, []) if s["side"] == "spotbuy"
+            ]
 
             for short in short_futures:
                 short_id = id(short)
@@ -1189,18 +1463,23 @@ def api_closed_positions():
 
                     legs = [short, best_spot]
                     size_total = short_size
-                    notional_total = (float(short.get("notional") or 0.0) +
-                                      float(best_spot.get("notional") or 0.0))
-                    fees_total = (float(short.get("fees") or 0.0) +
-                                  float(best_spot.get("fees") or 0.0))
+                    notional_total = float(short.get("notional") or 0.0) + float(
+                        best_spot.get("notional") or 0.0
+                    )
+                    fees_total = float(short.get("fees") or 0.0) + float(
+                        best_spot.get("fees") or 0.0
+                    )
                     funding_total = float(short.get("funding_fee") or 0.0)
-                    realized_total = (float(short.get("realized_pnl") or 0.0) +
-                                      float(best_spot.get("realized_pnl") or 0.0))
+                    realized_total = float(short.get("realized_pnl") or 0.0) + float(
+                        best_spot.get("realized_pnl") or 0.0
+                    )
                     pnl_total = realized_total
 
                     open_time = min(short_time, int(best_spot.get("open_time") or 0))
-                    close_time = max(int(short.get("close_time") or 0),
-                                     int(best_spot.get("close_time") or 0))
+                    close_time = max(
+                        int(short.get("close_time") or 0),
+                        int(best_spot.get("close_time") or 0),
+                    )
 
                     delta_group = {
                         "symbol": base,
@@ -1213,13 +1492,22 @@ def api_closed_positions():
                         "realized_total": realized_total,
                         "entry_avg": float(best_spot.get("entry_price") or 0.0),
                         "close_avg": float(short.get("close_price") or 0.0),
-                        "open_date": datetime.fromtimestamp(open_time).strftime("%Y-%m-%d %H:%M") if open_time else "-",
-                        "close_date": datetime.fromtimestamp(close_time).strftime("%Y-%m-%d %H:%M") if close_time else "-",
+                        "open_date": (
+                            datetime.fromtimestamp(open_time).strftime("%Y-%m-%d %H:%M")
+                            if open_time
+                            else "-"
+                        ),
+                        "close_date": (
+                            datetime.fromtimestamp(close_time).strftime(
+                                "%Y-%m-%d %H:%M"
+                            )
+                            if close_time
+                            else "-"
+                        ),
                         "type": "delta_neutral",
                     }
                     delta_neutral_groups.append(delta_group)
                     matching_spot_buys.remove(best_spot)
-                    
 
         # ==========================================================
         # PASO 2: CLUSTERING NORMAL DE FUTUROS (EXCLUYE EMPAREJADOS)
@@ -1230,7 +1518,12 @@ def api_closed_positions():
             # Filtra los ya emparejados
             items = [p for p in items if not p.get("_paired_delta_neutral")]
 
-            items.sort(key=lambda x: (int(x.get("open_time") or 0), int(x.get("close_time") or 0)))
+            items.sort(
+                key=lambda x: (
+                    int(x.get("open_time") or 0),
+                    int(x.get("close_time") or 0),
+                )
+            )
             clusters = []
 
             for p in items:
@@ -1252,18 +1545,22 @@ def api_closed_positions():
                             best_idx = i
 
                 if best_idx == -1:
-                    clusters.append({
-                        "legs": [p],
-                        "open_ref": ot or ct,
-                        "close_ref": ct or ot,
-                        "size_ref": size
-                    })
+                    clusters.append(
+                        {
+                            "legs": [p],
+                            "open_ref": ot or ct,
+                            "close_ref": ct or ot,
+                            "size_ref": size,
+                        }
+                    )
                 else:
                     c = clusters[best_idx]
                     c["legs"].append(p)
                     c["open_ref"] = min(c["open_ref"], ot or c["open_ref"])
                     c["close_ref"] = max(c["close_ref"], ct or c["close_ref"])
-                    c["size_ref"] = (c["size_ref"] + size) / 2.0 if size > 0 else c["size_ref"]
+                    c["size_ref"] = (
+                        (c["size_ref"] + size) / 2.0 if size > 0 else c["size_ref"]
+                    )
 
             for c in clusters:
                 legs = c["legs"]
@@ -1281,41 +1578,94 @@ def api_closed_positions():
                     entry_val = float(x.get("entry_price") or 0.0)
                     close_val = float(x.get("close_price") or 0.0)
                     side_val = (x.get("side") or "").lower()
-                    pnl_simple_total += (entry_val - close_val) * size_val if side_val == "short" \
-                                        else (close_val - entry_val) * size_val
+                    pnl_simple_total += (
+                        (entry_val - close_val) * size_val
+                        if side_val == "short"
+                        else (close_val - entry_val) * size_val
+                    )
 
-                pnl_total = pnl_fifo_total if abs(pnl_fifo_total) != 0 else pnl_simple_total
+                pnl_total = (
+                    pnl_fifo_total if abs(pnl_fifo_total) != 0 else pnl_simple_total
+                )
 
                 if size_total > 0:
-                    entry_weighted = sum(float(x.get("entry_price") or 0.0) * float(x.get("size") or 0.0) for x in legs) / size_total
-                    close_weighted = sum(float(x.get("close_price") or 0.0) * float(x.get("size") or 0.0) for x in legs) / size_total
+                    entry_weighted = (
+                        sum(
+                            float(x.get("entry_price") or 0.0)
+                            * float(x.get("size") or 0.0)
+                            for x in legs
+                        )
+                        / size_total
+                    )
+                    close_weighted = (
+                        sum(
+                            float(x.get("close_price") or 0.0)
+                            * float(x.get("size") or 0.0)
+                            for x in legs
+                        )
+                        / size_total
+                    )
                 else:
                     entry_weighted = 0.0
                     close_weighted = 0.0
 
-                open_time = min(int(x.get("open_time") or 0) for x in legs if x.get("open_time") is not None) if legs else None
-                close_time = max(int(x.get("close_time") or 0) for x in legs if x.get("close_time") is not None) if legs else None
+                open_time = (
+                    min(
+                        int(x.get("open_time") or 0)
+                        for x in legs
+                        if x.get("open_time") is not None
+                    )
+                    if legs
+                    else None
+                )
+                close_time = (
+                    max(
+                        int(x.get("close_time") or 0)
+                        for x in legs
+                        if x.get("close_time") is not None
+                    )
+                    if legs
+                    else None
+                )
 
-                normal_groups.append({
-                    "symbol": base,
-                    "positions": legs,
-                    "size_total": size_total,
-                    "notional_total": notional_total,
-                    "pnl_total": pnl_total,
-                    "pnl_fifo_total": pnl_fifo_total,
-                    "pnl_simple_total": pnl_simple_total,
-                    "pnl_price_sum": pnl_fifo_total,
-                    "pnl_price_avg": (sum(float(x.get("pnl_percent") or 0.0) for x in legs) / max(len(legs), 1)),
-                    "apr_avg": (sum(float(x.get("apr") or 0.0) for x in legs) / max(len(legs), 1)),
-                    "fees_total": fees_total,
-                    "funding_total": funding_total,
-                    "realized_total": realized_total,
-                    "entry_avg": entry_weighted,
-                    "close_avg": close_weighted,
-                    "open_date": datetime.fromtimestamp(open_time).strftime("%Y-%m-%d %H:%M") if open_time else "-",
-                    "close_date": datetime.fromtimestamp(close_time).strftime("%Y-%m-%d %H:%M") if close_time else "-",
-                    "type": "futures"
-                })
+                normal_groups.append(
+                    {
+                        "symbol": base,
+                        "positions": legs,
+                        "size_total": size_total,
+                        "notional_total": notional_total,
+                        "pnl_total": pnl_total,
+                        "pnl_fifo_total": pnl_fifo_total,
+                        "pnl_simple_total": pnl_simple_total,
+                        "pnl_price_sum": pnl_fifo_total,
+                        "pnl_price_avg": (
+                            sum(float(x.get("pnl_percent") or 0.0) for x in legs)
+                            / max(len(legs), 1)
+                        ),
+                        "apr_avg": (
+                            sum(float(x.get("apr") or 0.0) for x in legs)
+                            / max(len(legs), 1)
+                        ),
+                        "fees_total": fees_total,
+                        "funding_total": funding_total,
+                        "realized_total": realized_total,
+                        "entry_avg": entry_weighted,
+                        "close_avg": close_weighted,
+                        "open_date": (
+                            datetime.fromtimestamp(open_time).strftime("%Y-%m-%d %H:%M")
+                            if open_time
+                            else "-"
+                        ),
+                        "close_date": (
+                            datetime.fromtimestamp(close_time).strftime(
+                                "%Y-%m-%d %H:%M"
+                            )
+                            if close_time
+                            else "-"
+                        ),
+                        "type": "futures",
+                    }
+                )
 
         # ==========================================================
         # PASO 3: SWAPS DE STABLECOINS
@@ -1333,9 +1683,21 @@ def api_closed_positions():
                 "realized_total": float(swap.get("realized_pnl") or 0.0),
                 "entry_avg": float(swap.get("entry_price") or 0.0),
                 "close_avg": float(swap.get("close_price") or 0.0),
-                "open_date": datetime.fromtimestamp(int(swap.get("open_time") or 0)).strftime("%Y-%m-%d %H:%M") if swap.get("open_time") else "-",
-                "close_date": datetime.fromtimestamp(int(swap.get("close_time") or 0)).strftime("%Y-%m-%d %H:%M") if swap.get("close_time") else "-",
-                "type": "stable_swap"
+                "open_date": (
+                    datetime.fromtimestamp(int(swap.get("open_time") or 0)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    if swap.get("open_time")
+                    else "-"
+                ),
+                "close_date": (
+                    datetime.fromtimestamp(int(swap.get("close_time") or 0)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    if swap.get("close_time")
+                    else "-"
+                ),
+                "type": "stable_swap",
             }
             stable_swap_groups.append(stable_group)
 
@@ -1367,34 +1729,49 @@ def api_closed_positions():
                 "realized_total": realized,
                 "entry_avg": float(r.get("entry_price") or 0.0),
                 "close_avg": float(r.get("close_price") or 0.0),
-                "open_date": datetime.fromtimestamp(int(r.get("open_time") or 0)).strftime("%Y-%m-%d %H:%M") if r.get("open_time") else "-",
-                "close_date": datetime.fromtimestamp(int(r.get("close_time") or 0)).strftime("%Y-%m-%d %H:%M") if r.get("close_time") else "-",
-                "type": "spot"
+                "open_date": (
+                    datetime.fromtimestamp(int(r.get("open_time") or 0)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    if r.get("open_time")
+                    else "-"
+                ),
+                "close_date": (
+                    datetime.fromtimestamp(int(r.get("close_time") or 0)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                    if r.get("close_time")
+                    else "-"
+                ),
+                "type": "spot",
             }
             spot_only_groups.append(grp)
 
         # Combinar y ordenar
-        all_groups = normal_groups + delta_neutral_groups + stable_swap_groups + spot_only_groups
+        all_groups = (
+            normal_groups + delta_neutral_groups + stable_swap_groups + spot_only_groups
+        )
         all_groups.sort(key=lambda g: g["close_date"], reverse=True)
 
-        print(f"📊 Grupos: futures={len(normal_groups)}, delta_neutral={len(delta_neutral_groups)}, stable_swaps={len(stable_swap_groups)}, spot_only={len(spot_only_groups)}")
+        print(
+            f"📊 Grupos: futures={len(normal_groups)}, delta_neutral={len(delta_neutral_groups)}, stable_swaps={len(stable_swap_groups)}, spot_only={len(spot_only_groups)}"
+        )
         return jsonify({"closed_positions": all_groups})
 
     except Exception as e:
         print(f"❌ Error leyendo/agrupando closed_positions: {e}")
         import traceback
+
         traceback.print_exc()
         return jsonify({"closed_positions": []})
+
 
 @app.route("/")
 def index():
     return render_template(TEMPLATE_FILE)
 
 
-
-
-
-@app.route('/api/balances')
+@app.route("/api/balances")
 def get_balances():
     balances = []
 
@@ -1415,12 +1792,16 @@ def get_balances():
     if binance_data:
         # En fetch_account_binance ya separa spot y futures internamente
         # Asumiendo que balance incluye spot y futures_wallet_balance es solo futuros
-        spot_balance = binance_data.get("balance", 0) - binance_data.get("initial_margin", 0)
-        binance_data.update({
-            "spot": max(spot_balance, 0),  # Asegurar no negativo
-            "margin": 0,
-            "futures": binance_data.get("initial_margin", 0)
-        })
+        spot_balance = binance_data.get("balance", 0) - binance_data.get(
+            "initial_margin", 0
+        )
+        binance_data.update(
+            {
+                "spot": max(spot_balance, 0),  # Asegurar no negativo
+                "margin": 0,
+                "futures": binance_data.get("initial_margin", 0),
+            }
+        )
         balances.append(binance_data)
 
     # Aster
@@ -1481,73 +1862,75 @@ def get_balances():
     except Exception as e:
         print(f"❌ KuCoin balances error in route: {e}")
 
-
-        
-     #Gate.io   
+    # Gate.io
     gate_data = fetch_gate_all_balances(settles=("usdt",))
     if gate_data:
-        gate_spot = sum(bal['available'] + bal['locked'] for bal in gate_data.get('spot', []))
-        gate_futures = sum(fut['balance'] for fut in gate_data.get('futures', []))
-        
-        gate_data.update({
-            "exchange": "gate",
-            "equity": gate_spot + gate_futures,
-            "balance": gate_spot + gate_futures,
-            "unrealized_pnl": sum(fut['unrealized_pnl'] for fut in gate_data.get('futures', [])),
-            "spot": gate_spot,
-            "margin": 0,
-            "futures": gate_futures,
-        })
+        gate_spot = sum(
+            bal["available"] + bal["locked"] for bal in gate_data.get("spot", [])
+        )
+        gate_futures = sum(fut["balance"] for fut in gate_data.get("futures", []))
+
+        gate_data.update(
+            {
+                "exchange": "gate",
+                "equity": gate_spot + gate_futures,
+                "balance": gate_spot + gate_futures,
+                "unrealized_pnl": sum(
+                    fut["unrealized_pnl"] for fut in gate_data.get("futures", [])
+                ),
+                "spot": gate_spot,
+                "margin": 0,
+                "futures": gate_futures,
+            }
+        )
         balances.append(gate_data)
         print(f"✅ Gate.io balances: spot={gate_spot:.2f}, futures={gate_futures:.2f}")
-        
-        
+
     # MEXC
     try:
         mexc_data = fetch_mexc_all_balances()  # ← SIN settles, sin settle
-        if mexc_data: balances.append(mexc_data)
+        if mexc_data:
+            balances.append(mexc_data)
         print("✅ MEXC balances OK")
     except Exception as e:
         print(f"❌ MEXC balances error: {e}")
-        
+
     # Bitget
     try:
         bitget_data = fetch_bitget_all_balances()
-        if bitget_data: 
+        if bitget_data:
             balances.append(bitget_data)
         print("✅ Bitget balances OK")
     except Exception as e:
         print(f"❌ Bitget balances error: {e}")
-        
+
     # OKX
     try:
         okx_data = fetch_okx_all_balances()
-        if okx_data: 
+        if okx_data:
             balances.append(okx_data)
         print("✅ OKX balances OK")
     except Exception as e:
         print(f"❌ OKX balances error: {e}")
-        
+
     # Paradex
     try:
         paradex_data = fetch_paradex_all_balances()
-        if paradex_data: 
+        if paradex_data:
             balances.append(paradex_data)
         print("✅ Paradex balances OK")
     except Exception as e:
         print(f"❌ Paradex balances error: {e}")
-        
-    
-        
-      # Hyperliquid
+
+    # Hyperliquid
     try:
         hyper_data = fetch_hyperliquid_all_balances()
         if hyper_data:
             balances.append(hyper_data)
         print("✅ Hyperliquid balances OK")
     except Exception as e:
-        print(f"❌ Hyperliquid balances error: {e}")  
-     
+        print(f"❌ Hyperliquid balances error: {e}")
+
         # Whitebit
     try:
         whitebit_data = fetch_whitebit_all_balances()
@@ -1555,8 +1938,8 @@ def get_balances():
             balances.append(whitebit_data)
         print("✅ whitebit balances OK")
     except Exception as e:
-        print(f"❌ whitebit balances error: {e}")    
-        
+        print(f"❌ whitebit balances error: {e}")
+
         # XT
     try:
         xt_bal = fetch_xt_all_balances()
@@ -1565,154 +1948,66 @@ def get_balances():
         print("✅ XT balances OK")
     except Exception as e:
         print(f"❌ XT balances error: {e}")
-        
-        
 
     # Totales
     total_equity = sum(b.get("equity", 0) for b in balances)
     total_balance = sum(b.get("balance", 0) for b in balances)
     total_unreal = sum(b.get("unrealized_pnl", 0) for b in balances)
 
-    return jsonify({
-        "totals": {
-            "equity": total_equity,
-            "balance": total_balance,
-            "unrealized_pnl": total_unreal,
-        },
-        "exchanges": balances
-    })
+    return jsonify(
+        {
+            "totals": {
+                "equity": total_equity,
+                "balance": total_balance,
+                "unrealized_pnl": total_unreal,
+            },
+            "exchanges": balances,
+        }
+    )
 
 
-@app.route('/api/positions')
+@app.route("/api/positions", methods=["GET", "POST"])
 def get_positions():
-    print("📡 Solicitando datos de posiciones.")
+    # Obtener exchanges seleccionados desde POST body
+    selected_exchanges = []
+    if request.method == "POST":
+        try:
+            payload = request.get_json() or {}
+            selected_exchanges = payload.get("exchanges", [])
+        except:
+            pass
+
+    # Si no hay selección, usar todos
+    if not selected_exchanges:
+        selected_exchanges = list(POSITIONS_FUNCTIONS.keys())
+
+    print(f"📡 Solicitando posiciones de: {selected_exchanges}")
     all_positions = []
 
-    # Backpack
-    try:
-        all_positions.extend(fetch_positions_backpack())
-    except Exception as e:
-        print(f"❌ Backpack positions error: {e}")
+    for exchange_name in selected_exchanges:
+        if exchange_name not in POSITIONS_FUNCTIONS:
+            continue
+        try:
+            fetch_func = POSITIONS_FUNCTIONS[exchange_name]
+            positions = fetch_func()
+            all_positions.extend(positions)
+            # Actualizar cache
+            update_cache_from_positions(exchange_name, positions)
+        except Exception as e:
+            print(f"❌ {exchange_name} error: {e}")
 
-    # Aster
-    try:
-        all_positions.extend(fetch_aster_open_positions())
-    except Exception as e:
-        print(f"❌ Aster positions error: {e}")
-
-    # Binance
-    try:
-        all_positions.extend(fetch_positions_binance_enriched())
-    except Exception as e:
-        print(f"❌ Binance positions error: {e}")
-
-    # BingX
-    try:
-        all_positions.extend(fetch_bingx_open_positions())
-    except Exception as e:
-        print(f"❌ BingX positions error: {e}")
-
-    # Aden / Orderly
-    try:
-        aden_data = _send_request("GET", "/v1/positions")
-        all_positions.extend(fetch_positions_aden(aden_data))
-    except Exception as e:
-        print(f"❌ Aden positions error: {e}")
-
-    # KuCoin
-    try:
-        all_positions.extend(fetch_kucoin_open_positions())
-    except Exception as e:
-        print(f"❌ KuCoin positions error: {e}")
-    # Extended
-    try:
-        all_positions.extend(fetch_open_extended_positions())
-    except Exception as e:
-        print(f"❌ KuCoin positions error: {e}")
-
-    # Gate.io
-    try:
-        all_positions.extend(fetch_gate_open_positions(settle="usdt"))
-    except Exception as e:
-        print(f"❌ Gate.io positions error: {e}")
-
-    # MEXC  ← sin settle, gracias
-    try:
-        mexc_positions = fetch_mexc_open_positions()
-        all_positions.extend(mexc_positions)
-        print(f"✅ MEXC posiciones: {len(mexc_positions)}")
-    except Exception as e:
-        print(f"❌ MEXC positions error: {e}")
-    # Bitget   
-    try:
-        bitget_positions = fetch_bitget_open_positions()
-        all_positions.extend(bitget_positions)
-        print(f"✅ Bitget posiciones: {len(bitget_positions)}")
-    except Exception as e:
-        print(f"❌ Bitget positions error: {e}")
-        
-    # OKX
-    try:
-        okx_positions = fetch_okx_open_positions()
-        all_positions.extend(okx_positions)
-        print(f"✅ OKX posiciones: {len(okx_positions)}")
-    except Exception as e:
-        print(f"❌ OKX positions error: {e}")
-     
-    # Paradex
-    try:
-        paradex_positions = fetch_paradex_open_positions()
-        all_positions.extend(paradex_positions)
-        print(f"✅ Paradex posiciones: {len(paradex_positions)}")
-    except Exception as e:
-        print(f"❌ Paradex positions error: {e}")
-        
-    # Hyperliquid
-    try:
-        hyper_positions = fetch_hyperliquid_open_positions()
-        all_positions.extend(hyper_positions)
-        print(f"✅ Hyperliquid posiciones: {len(hyper_positions)}")
-    except Exception as e:
-        print(f"❌ Hyperliquid positions error: {e}")
-     #Whitebit   
-    try:
-        wb_pos = fetch_whitebit_open_positions()
-        all_positions.extend(wb_pos)
-        print(f"✅ WhiteBIT posiciones: {len(wb_pos)}")
-    except Exception as e:
-        print(f"❌ WhiteBIT positions error: {e}")      
-     
-        # XT
-    try:
-        xt_pos = fetch_xt_open_positions()
-        all_positions.extend(xt_pos)
-        print(f"✅ XT posiciones: {len(xt_pos)}")
-    except Exception as e:
-        print(f"❌ XT positions error: {e}")
-        
-        # Bybit
-    try:
-        bybit_pos = fetch_bybit_open_positions()
-        all_positions.extend(bybit_pos)
-        print(f"✅ Bybit posiciones: {len(bybit_pos)}")
-    except Exception as e:
-        print(f"❌ Bybit positions error: {e}")
-        
-        
-    # Actualiza cache de exchanges activos con posiciones abiertas
-    try:
-        active = set(p.get("exchange","").lower() for p in all_positions if p.get("exchange"))
-        _update_open_pos_cache(active)
-    except Exception:
-        pass
-    
+    # Actualizar funding para exchanges con posiciones
+    active_exchanges = list(
+        set(p.get("exchange") for p in all_positions if p.get("exchange"))
+    )
+    if active_exchanges:
+        try:
+            sync_all_funding(exchanges=active_exchanges, verbose=False)
+        except Exception as e:
+            print(f"⚠️ Error syncing funding: {e}")
 
     print(f"📊 Total posiciones: {len(all_positions)}")
-    
-    
     return jsonify({"positions": all_positions})
-
-
 
 
 # =====================================================
@@ -1722,20 +2017,40 @@ def get_positions():
 SYNC_FUNCTIONS = {
     "backpack": lambda days=60: save_backpack_closed_positions("portfolio.db"),
     "aden": lambda days=60: save_aden_closed_positions("portfolio.db", debug=False),
-    "bingx": lambda days=30: save_bingx_closed_positions("portfolio.db", symbols=None, days=days, include_funding=True, debug=True),
-    "aster": lambda days=50: save_aster_closed_positions("portfolio.db", days=days, debug=False),
-    "binance": lambda days=55: save_binance_closed_positions("portfolio.db", days=days, debug=False),
-    "extended": lambda days=60: save_extended_closed_positions("portfolio.db", debug=False),
+    "bingx": lambda days=30: save_bingx_closed_positions(
+        "portfolio.db", symbols=None, days=days, include_funding=True, debug=True
+    ),
+    "aster": lambda days=50: save_aster_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
+    "binance": lambda days=55: save_binance_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
+    "extended": lambda days=60: save_extended_closed_positions(
+        "portfolio.db", debug=False
+    ),
     "kucoin": lambda days=60: save_kucoin_closed_positions("portfolio.db", debug=False),
     "gate": lambda days=60: save_gate_closed_positions("portfolio.db"),
-    "mexc": lambda days=10: save_mexc_closed_positions("portfolio.db", days=days, debug=PRINT_CLOSED_DEBUG),
-    "bitget": lambda days=60: save_bitget_closed_positions("portfolio.db", days=days, debug=False),
-    "okx": lambda days=60: save_okx_closed_positions("portfolio.db", days=days, debug=False),
+    "mexc": lambda days=10: save_mexc_closed_positions(
+        "portfolio.db", days=days, debug=PRINT_CLOSED_DEBUG
+    ),
+    "bitget": lambda days=60: save_bitget_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
+    "okx": lambda days=60: save_okx_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
     "paradex": lambda days=60: save_paradex_closed_positions("portfolio.db"),
-    "hyperliquid": lambda days=60: save_hyperliquid_closed_positions("portfolio.db", days=days, debug=False),
-    "whitebit": lambda days=50: save_whitebit_closed_positions("portfolio.db", days=days, debug=False),
+    "hyperliquid": lambda days=60: save_hyperliquid_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
+    "whitebit": lambda days=50: save_whitebit_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
     "xt": lambda days=60: save_xt_closed_positions("portfolio.db", days=days),
-    "bybit": lambda days=60: save_bybit_closed_positions("portfolio.db", days=days, debug=False),
+    "bybit": lambda days=60: save_bybit_closed_positions(
+        "portfolio.db", days=days, debug=False
+    ),
     "lbank": lambda days=60: save_lbank_closed_positions("portfolio.db", days=days),
 }
 
@@ -1759,28 +2074,33 @@ POSITIONS_FUNCTIONS = {
     "bybit": lambda: fetch_bybit_open_positions(),
 }
 
+
 # borrar despues
 def main():
     print("🚀 Iniciando actualización de portfolio.")
     # Inicializar cache universal
-    init_universal_cache_db(CACHE_DB_PATH)
+    init_universal_cache_db()
 
     # ✅ Actualizar cache para TODOS los exchanges que tengan posiciones abiertas
     print("🔄 Actualizando cache universal para todos los exchanges...")
-    
+
     for ex_name, fetch_positions_func in POSITIONS_FUNCTIONS.items():
         if should_sync(ex_name):
             try:
                 print(f"   📦 {ex_name.capitalize()}: obteniendo posiciones...")
                 positions = fetch_positions_func()
-                update_cache_from_positions(ex_name, positions, CACHE_DB_PATH)
-                print(f"   ✅ {ex_name.capitalize()}: {len(positions)} posiciones en cache")
+                update_cache_from_positions(ex_name, positions, "cache.db")
+                print(
+                    f"   ✅ {ex_name.capitalize()}: {len(positions)} posiciones en cache"
+                )
             except Exception as e:
                 print(f"   ⚠️ {ex_name.capitalize()}: error - {e}")
-    
+
     # Mostrar estadísticas del cache
-    stats = get_cache_stats()
-    print(f"📊 Cache universal: {stats['total_entries']} símbolos (TTL: {UNIVERSAL_CACHE_TTL_DAYS} días)")
+    stats = get_cache_stats("cache.db")
+    print(
+        f"📊 Cache universal: {stats['total_entries']} símbolos (TTL: {UNIVERSAL_CACHE_TTL_DAYS} días)"
+    )
     # =====================================================
     # 🧠 SMART SYNC - Alternativa 3
     #   1) Forzar una vez Bitget (full sync corto)
@@ -1789,17 +2109,6 @@ def main():
     if SMART_SYNC_ENABLED:
         print("🧠 Modo Smart Sync activado")
 
-        # (1) Fuerza un full sync “de arranque” SOLO para Bitget
-        try:
-            saved_bitget = smart_sync_closed_positions(
-                "bitget",
-                force_full_sync=True,
-                debug=PRINT_CLOSED_SYNC
-            )
-            print(f"⚡ Bitget full sync inicial: {saved_bitget} posiciones guardadas")
-        except Exception as e:
-            print(f"❌ Error en full sync inicial de Bitget: {e}")
-
         # (2) Bucle normal para el resto de exchanges
         total_saved = 0
         for exchange_name in SYNC_FUNCTIONS.keys():
@@ -1807,7 +2116,7 @@ def main():
                 saved = smart_sync_closed_positions(
                     exchange_name,
                     force_full_sync=False,  # ahora modo normal
-                    debug=PRINT_CLOSED_SYNC
+                    debug=PRINT_CLOSED_SYNC,
                 )
                 total_saved += saved
             except Exception as e:
@@ -1835,51 +2144,54 @@ def main():
                 symbols=None,
                 days=30,
                 include_funding=True,
-                debug=True
+                debug=True,
             )
 
         # Ejecutar sincronización para cada exchange configurado
         for exchange_name, sync_function in SYNC_FUNCTIONS.items():
             if should_sync(exchange_name):
-                print(f"⏳ Sincronizando fills cerrados de {exchange_name.capitalize()}.")
+                print(
+                    f"⏳ Sincronizando fills cerrados de {exchange_name.capitalize()}."
+                )
                 try:
                     if exchange_name == "bingx":
                         sync_bingx()
                     else:
                         sync_function()
-                    print(f"✅ Posiciones cerradas de {exchange_name.capitalize()} actualizadas correctamente.")
+                    print(
+                        f"✅ Posiciones cerradas de {exchange_name.capitalize()} actualizadas correctamente."
+                    )
                 except Exception as e:
                     print(f"❌ Error en {exchange_name}: {e}")
             else:
                 print(f"⏭️  Saltando {exchange_name.capitalize()}")
 
-    # =====================================================
-    # 📦 SPOT TRADES SYNC (opcional; déjalo igual que lo tenías)
+    # 📦 SPOT TRADES SYNC (unificado con futures)
     # =====================================================
     spot_sync_functions = {
-        "gate":   lambda: save_gate_spot_positions("portfolio.db", days_back=40),
+        "gate": lambda: save_gate_spot_positions("portfolio.db", days_back=40),
         "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
         "xt": lambda: save_xt_spot_positions("portfolio.db", days_back=40),
-    
+        "mexc": lambda: save_mexc_spot_positions(db_path="portfolio.db", days_back=40),
     }
 
     for exchange_name, sync_function in spot_sync_functions.items():
-        if should_sync_spot(exchange_name):
+        if should_sync(exchange_name):  # Mismo filtro que futures
             print(f"⏳ Sincronizando SPOT TRADES de {exchange_name.capitalize()}.")
             try:
                 sync_function()
-                print(f"✅ Trades de spot de {exchange_name.capitalize()} actualizados correctamente.")
+                print(
+                    f"✅ Trades de spot de {exchange_name.capitalize()} actualizados correctamente."
+                )
             except Exception as e:
                 print(f"❌ Error en spot trades de {exchange_name}: {e}")
-
-    print("🧩 Sincronización completada.")
 
 
 # def main():
 #     print("🚀 Iniciando actualización de portfolio...")
 #     # Inicializar cache universal
 #     init_universal_cache_db()
-    
+
 #     # Función para actualizar cache de un exchange
 #     def update_exchange_cache(exchange_name, fetch_positions_func):
 #         try:
@@ -1888,7 +2200,7 @@ def main():
 #             update_cache_from_positions(exchange_name, positions)
 #         except Exception as e:
 #             print(f"⚠️ Error actualizando cache de {exchange_name}: {e}")
-    
+
 #     # Actualizar cache de exchanges con posiciones abiertas
 #     # ✅ Actualizar cache para TODOS los exchanges que tengan posiciones abiertas
 #     # ⚡ Haz un full sync de Bitget una vez (ej.: 7 días) para inicializar su histórico
@@ -1897,34 +2209,34 @@ def main():
 #     for ex_name, fetch_positions_func in POSITIONS_FUNCTIONS.items():
 #         if should_sync(ex_name):
 #             update_exchange_cache(ex_name, fetch_positions_func)
-    
-    
+
+
 #     # Mostrar estadísticas del cache
 #     stats = get_cache_stats()
 #     print(f"📊 Cache universal: {stats['total_entries']} símbolos (TTL: {UNIVERSAL_CACHE_TTL_DAYS} días)")
-    
+
 #     # =====================================================
 #     # 🧠 SMART SYNC - Sincronización inteligente
 #     # =====================================================
-    
+
 #     if SMART_SYNC_ENABLED:
 #         print("🧠 Modo Smart Sync activado")
-        
+
 #         total_saved = 0
 #         for exchange_name in SYNC_FUNCTIONS.keys():
 #             saved = smart_sync_closed_positions(
-#                 exchange_name, 
+#                 exchange_name,
 #                 force_full_sync=False,  # Cambiar a True para forzar sync completo
 #                 debug=PRINT_CLOSED_SYNC
 #             )
 #             total_saved += saved
-        
+
 #         print(f"✅ Smart Sync completado: {total_saved} posiciones totales guardadas")
-    
+
 #     else:
 #         # Modo legacy (sync tradicional)
 #         print("📋 Modo Legacy Sync")
-        
+
 #         # Función especial para BingX que necesita preparación
 #         def sync_bingx():
 #             try:
@@ -1933,7 +2245,7 @@ def main():
 #                 debug_cache_status()
 #             except Exception:
 #                 pass
-        
+
 #             save_bingx_closed_positions(
 #                 db_path="portfolio.db",
 #                 symbols=None,
@@ -1941,7 +2253,7 @@ def main():
 #                 include_funding=True,
 #                 debug=True
 #             )
-        
+
 #         # Ejecutar sincronización para cada exchange configurado
 #         for exchange_name, sync_function in SYNC_FUNCTIONS.items():
 #             if should_sync(exchange_name):
@@ -1957,16 +2269,16 @@ def main():
 #                     print(f"❌ Error en {exchange_name}: {e}")
 #             else:
 #                 print(f"⏭️  Saltando {exchange_name.capitalize()}")
-    
+
 #     # =====================================================
 #     # 📦 SPOT TRADES SYNC
 #     # =====================================================
-    
+
 #     spot_sync_functions = {
 #         "gate": lambda: save_gate_spot_positions("portfolio.db", days_back=40),
 #         "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
 #     }
-    
+
 #     for exchange_name, sync_function in spot_sync_functions.items():
 #         if should_sync_spot(exchange_name):
 #             print(f"⏳ Sincronizando SPOT TRADES de {exchange_name.capitalize()}...")
@@ -1975,14 +2287,17 @@ def main():
 #                 print(f"✅ Trades de spot de {exchange_name.capitalize()} actualizados correctamente.")
 #             except Exception as e:
 #                 print(f"❌ Error en spot trades de {exchange_name}: {e}")
- 
+
 #     print("🧩 Sincronización completada.")
 
 
-#====================================================
+# ====================================================
 # codigo para boton de guardar automaticamente
 
-def save_closed_positions_generic(exchange: str, days: int = 30, db_path: str = "portfolio.db", debug: bool = False):
+
+def save_closed_positions_generic(
+    exchange: str, days: int = 30, db_path: str = "portfolio.db", debug: bool = False
+):
     """
     Dispara el guardado de posiciones cerradas para un exchange concreto usando la
     ventana 'days' y devuelve métricas estándar.
@@ -2005,7 +2320,7 @@ def save_closed_positions_generic(exchange: str, days: int = 30, db_path: str = 
         updated = 0
         skipped = 0
     elif isinstance(res, dict):
-        saved  = int(res.get("inserted") or res.get("saved") or 0)
+        saved = int(res.get("inserted") or res.get("saved") or 0)
         updated = int(res.get("updated") or 0)
         skipped = int(res.get("skipped") or 0)
     else:
@@ -2013,7 +2328,7 @@ def save_closed_positions_generic(exchange: str, days: int = 30, db_path: str = 
 
     # 2) Actualizar timestamps y caché universal
     try:
-        update_sync_timestamp(exchange)
+        update_sync_timestamp(exchange, "cache.db")
     except Exception:
         pass
 
@@ -2021,12 +2336,21 @@ def save_closed_positions_generic(exchange: str, days: int = 30, db_path: str = 
         fetch_positions = POSITIONS_FUNCTIONS.get(exchange)
         if fetch_positions:
             current_positions = fetch_positions()
-            update_cache_from_positions(exchange, current_positions, CACHE_DB_PATH)
+            update_cache_from_positions(exchange, current_positions, "cache.db")
     except Exception:
         pass
 
-    return {"inserted": saved, "updated": updated, "skipped": skipped, "days": days, "exchange": exchange}
+    return {
+        "inserted": saved,
+        "updated": updated,
+        "skipped": skipped,
+        "days": days,
+        "exchange": exchange,
+    }
+
+
 from flask import Blueprint, request, jsonify
+
 
 def _resolve_direct_closed_saver(exchange: str):
     """
@@ -2063,7 +2387,10 @@ def _resolve_direct_closed_saver(exchange: str):
         raise last_err
     raise RuntimeError(f"No encuentro función de guardado para '{exchange}'")
 
-def force_load_closed_positions(exchange: str, days: int = 30, db_path: str = "portfolio.db", **kw):
+
+def force_load_closed_positions(
+    exchange: str, days: int = 30, db_path: str = "portfolio.db", **kw
+):
     """
     Fuerza la descarga+guardado de posiciones cerradas ignorando cache de símbolos.
     Llama directamente a la función del adapter.
@@ -2076,6 +2403,7 @@ def force_load_closed_positions(exchange: str, days: int = 30, db_path: str = "p
     except TypeError:
         # Adapters antiguos: admitir (days) o (start_ms, end_ms)
         from time import time as _t
+
         end_ms = int(_t() * 1000)
         start_ms = end_ms - int(days) * 24 * 60 * 60 * 1000
         try:
@@ -2092,7 +2420,7 @@ def force_load_closed_positions(exchange: str, days: int = 30, db_path: str = "p
     elif isinstance(res, int):
         saved, updated, skipped = int(res), 0, 0
     elif isinstance(res, dict):
-        saved  = int(res.get("inserted") or res.get("saved") or 0)
+        saved = int(res.get("inserted") or res.get("saved") or 0)
         updated = int(res.get("updated") or 0)
         skipped = int(res.get("skipped") or 0)
     else:
@@ -2100,7 +2428,9 @@ def force_load_closed_positions(exchange: str, days: int = 30, db_path: str = "p
 
     return {"inserted": saved, "updated": updated, "skipped": skipped}
 
+
 api = Blueprint("api", __name__)
+
 
 @app.post("/api/closed/load")
 def api_closed_load():
@@ -2117,13 +2447,15 @@ def api_closed_load():
         if not exchange:
             return jsonify({"error": "Falta 'exchange'"}), 400
 
-        result = force_load_closed_positions(exchange=exchange, days=days, db_path=DB_PATH, debug=True)
+        result = force_load_closed_positions(
+            exchange=exchange, days=days, db_path=DB_PATH, debug=True
+        )
         # (Opcional) refrescar cache de abiertas para la UI, pero NO es requisito para el guardado:
         try:
             fetch_positions = POSITIONS_FUNCTIONS.get(exchange)
             if fetch_positions:
                 current_positions = fetch_positions()
-                update_cache_from_positions(exchange, current_positions)
+                update_cache_from_positions(exchange, current_positions, "cache.db")
         except Exception:
             pass
 
@@ -2133,7 +2465,7 @@ def api_closed_load():
 
 
 # fin de la funcion para guardar automaticamente
-#=====================================================
+# =====================================================
 @app.post("/api/closed/sync")
 def api_closed_sync():
     """
@@ -2157,9 +2489,7 @@ def api_closed_sync():
         for ex in targets:
             try:
                 saved = smart_sync_closed_positions(
-                    ex,
-                    force_full_sync=force_full,
-                    debug=PRINT_CLOSED_SYNC
+                    ex, force_full_sync=force_full, debug=PRINT_CLOSED_SYNC
                 )
                 results[ex] = {"inserted": int(saved)}
                 total_saved += int(saved)
@@ -2169,7 +2499,7 @@ def api_closed_sync():
                     fetch_positions = POSITIONS_FUNCTIONS.get(ex)
                     if fetch_positions:
                         current_positions = fetch_positions()
-                        update_cache_from_positions(ex, current_positions)
+                        update_cache_from_positions(ex, current_positions, "cache.db")
                 except Exception:
                     pass
 
@@ -2177,21 +2507,28 @@ def api_closed_sync():
                 results[ex] = {"error": str(e)}
 
         # Respuesta homogénea
-        return jsonify({
-            "mode": "smart_sync",
-            "force_full_sync": force_full,
-            "targets": targets,
-            "total_inserted": total_saved,
-            "by_exchange": results
-        }), 200
+        return (
+            jsonify(
+                {
+                    "mode": "smart_sync",
+                    "force_full_sync": force_full,
+                    "targets": targets,
+                    "total_inserted": total_saved,
+                    "by_exchange": results,
+                }
+            ),
+            200,
+        )
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
- #=====================================================
+
+# =====================================================
 # 🏁 EJECUCIÓN PRINCIPAL (Init DB + Main + Flask)
 # =====================================================
 from flask import request
+
 
 def _parse_ts_seconds(x):
     """
@@ -2204,10 +2541,11 @@ def _parse_ts_seconds(x):
         pass
     try:
         # ISO → ms → s
-        ms = datetime.fromisoformat(str(x).replace("Z","")).timestamp() * 1000.0
+        ms = datetime.fromisoformat(str(x).replace("Z", "")).timestamp() * 1000.0
         return int(ms // 1000)
     except Exception:
         return 0
+
 
 @app.route("/api/manual/closed", methods=["POST"])
 def api_manual_closed():
@@ -2230,7 +2568,7 @@ def api_manual_closed():
             "close_time": int(_parse_ts_seconds(data.get("close_time") or 0)),
             "funding_total": float(data.get("funding_total") or 0),
             "fee_total": float(data.get("fee_total") or 0),
-            "realized_pnl": data.get("realized_pnl"),     # puede ser None → se compone
+            "realized_pnl": data.get("realized_pnl"),  # puede ser None → se compone
             "initial_margin": data.get("initial_margin"),
             "notional": data.get("notional"),
             "leverage": data.get("leverage"),
@@ -2238,23 +2576,37 @@ def api_manual_closed():
         }
 
         # Validación mínima
-        req_fields = ["exchange","symbol","side","size","entry_price","close_price","close_time"]
+        req_fields = [
+            "exchange",
+            "symbol",
+            "side",
+            "size",
+            "entry_price",
+            "close_price",
+            "close_time",
+        ]
         for f in req_fields:
             if not payload.get(f) and payload.get(f) != 0:
                 return jsonify({"error": f"Campo requerido: {f}"}), 400
 
         # Llama a la función estándar de guardado (se encarga de APR/ROI/etc.)
         from db_manager import save_closed_position
+
         save_closed_position(payload)
 
         # Recupera el id insertado por combinación (exchange, symbol, close_time) más reciente
         import sqlite3
-        conn = sqlite3.connect(DB_PATH); cur = conn.cursor()
-        cur.execute("""
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute(
+            """
             SELECT id FROM closed_positions
             WHERE exchange=? AND symbol=? AND close_time=?
             ORDER BY id DESC LIMIT 1
-        """, (payload["exchange"], payload["symbol"], payload["close_time"]))
+        """,
+            (payload["exchange"], payload["symbol"], payload["close_time"]),
+        )
         row = cur.fetchone()
         conn.close()
         new_id = row[0] if row else None
@@ -2269,16 +2621,15 @@ if __name__ == "__main__":
     init_db()
     init_funding_db()
     _init_funding_sync_state()
-    
+
     from db_manager import migrate_spot_support
+
     migrate_spot_support()
-    
+
     # ✅ NUEVO: Inicializar tabla de sync timestamps
     from universal_cache import init_sync_timestamps_table
+
     init_sync_timestamps_table()
-    # ✅ AGREGAR AQUÍ:
-    from universal_cache import migrate_universal_cache
-    migrate_universal_cache()  # ← Migra la columna last_seen
 
     if SYNC_FUNDING_ON_START:
         force = None
@@ -2288,8 +2639,10 @@ if __name__ == "__main__":
         except Exception:
             force = None
 
-        print("🔄 Sincronizando funding al arranque..."
-              + (f" (forzado {force} días)" if force else " (incremental)"))
+        print(
+            "🔄 Sincronizando funding al arranque..."
+            + (f" (forzado {force} días)" if force else " (incremental)")
+        )
 
         sync_all_funding(force_days=force, verbose=True)
 
