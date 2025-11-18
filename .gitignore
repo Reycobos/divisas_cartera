@@ -43,10 +43,10 @@ portfolio2_copia.py
 
 
 # === Archivos Lbank
-adapters/lbanktest.py
-adapters/lbank_adapter.py
-adapters/lbank_adapter_sdk.py
-adapters/lbank_adapter_SDKNOSIRVE.PYTHON
+lbanktest.py
+lbank_adapter.py
+lbank_adapter_sdk.py
+lbank_adapter_SDKNOSIRVE.PYTHON
 adapters/lbankdebugrequest.py
 adapters/lbankdiagnostic.py
 adapters/lbank.pairs.py
