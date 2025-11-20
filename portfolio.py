@@ -674,10 +674,10 @@ from adapters.bybit import (
     fetch_bybit_all_balances,
     save_bybit_closed_positions,
 )
-from adapters.lbank_adapter_SDK import (
-    fetch_lbank_all_balances,
-    save_lbank_closed_positions,
-)
+# from adapters.lbank_adapter_SDK import (
+#     fetch_lbank_all_balances,
+#     save_lbank_closed_positions,
+# )
 
 
 __all__ = [
@@ -759,7 +759,7 @@ def main_balances():
         "whitebit": lambda: fetch_whitebit_all_balances(),
         "xt": lambda: fetch_xt_all_balances(db_path="portfolio.db"),
         "bybit": lambda: fetch_bybit_all_balances(db_path="portfolio.db"),
-        "lbank": lambda: fetch_lbank_all_balances(db_path="portfolio.db"),
+        # "lbank": lambda: fetch_lbank_all_balances(db_path="portfolio.db"),
     }
 
     # ---------------------------------------------------------------
