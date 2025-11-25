@@ -45,7 +45,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
 # 🔐 Credenciales desde .env
 # PACIFICA_ACCOUNT = os.getenv("PACIFICA_ACCOUNT")
-PACIFICA_ACCOUNT = "3LTN5unrUtdYPVKdnwfXiLujmkchNecXC5KhvCNY2iSt"
+PACIFICA_ACCOUNT = os.getenv("PACIFICA_ACCOUNT", "")
 # Validar que existan las credenciales
 if not PACIFICA_ACCOUNT:
     raise ValueError(
