@@ -896,7 +896,6 @@ FUNDING_PULLERS = {
     "hyperliquid": lambda: fetch_hyperliquid_funding_fees(limit=1000),
     "whitebit": lambda: fetch_whitebit_funding_fees(limit=1000),
     "xt": lambda: fetch_xt_funding_fees(limit=1000),
-    "bybit": lambda **kw: fetch_bybit_funding_fees(limit=50, **kw),
 }
 
 
