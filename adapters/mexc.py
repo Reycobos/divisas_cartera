@@ -4,20 +4,22 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode, quote
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from datetime import datetime, timezone
 
 import requests
+
 # === Añade cerca de los imports / helpers ===
-_MARK_CACHE = {}          # { "SYMBOL": (price_float, ts_seconds) }
-_MARK_TTL   = 3.0         # segundos: cache cortita para la misma pasada
+_MARK_CACHE = {}  # { "SYMBOL": (price_float, ts_seconds) }
+_MARK_TTL = 3.0  # segundos: cache cortita para la misma pasada
 __all__ = [
     "fetch_mexc_open_positions",
     "fetch_mexc_funding_fees",
     "fetch_mexc_all_balances",
     "save_mexc_closed_positions",
-    "_mexc_request", 
+    "_mexc_request",
     "_get_mexc_keys",
     "MEXC_RECV_WINDOW",
     "MEXC_BASE_URL",
@@ -32,167 +34,74 @@ __all__ = [
 #     p_funding_fetching, p_funding_count,
 #     p_balance_equity
 # )
-# #===========================
+
+
+# ===========================
 # =========================
-# Config & creds
+# Config & credenciales
 # =========================
-
-MEXC_BASE_URL = "https://api.mexc.com"
-MEXC_API_KEY = os.getenv("MEXC_API_KEY")
-MEXC_API_SECRET = os.getenv("MEXC_SECRET")
-
-# Configuración por defecto de recvWindow, recomendado 5000 o menos.
-MEXC_RECV_WINDOW = 10000 
-
-def _get_mexc_keys() -> Tuple[str, str]:
-    """Obtiene y verifica las claves de API de MEXC."""
-    key = MEXC_API_KEY
-    secret = MEXC_API_SECRET
-    if not key or not secret:
-        raise ValueError("MEXC_API_KEY o MEXC_SECRET no están configurados en .env")
-    return key, secret
-
-def _sign_request(secret: str, total_params: str) -> str:
-    """
-    Genera la firma HMAC SHA256 para la solicitud de MEXC.
-    La firma debe estar en minúsculas.
-    """
-    signature = hmac.new(
-        secret.encode('utf-8'),
-        total_params.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
-    return signature.lower()
-
-def _mexc_request(
-    method: str, 
-    path: str, 
-    params: Optional[Dict[str, Any]] = None,
-    signed: bool = False, 
-    data: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None
-) -> Dict[str, Any]:
-    """
-    Realiza una solicitud HTTP a la API de MEXC, manejando la firma si es necesario.
-    
-    Args:
-        method: Método HTTP (GET, POST, etc.).
-        path: La ruta de la API (ej. /api/v3/spot/order/trades).
-        params: Parámetros a enviar en la query string.
-        signed: Booleano para indicar si la solicitud requiere firma.
-        data: Parámetros a enviar en el cuerpo de la solicitud.
-        headers: Encabezados adicionales.
-        
-    Returns:
-        Respuesta JSON de la API.
-    """
-    
-    url = f"{MEXC_BASE_URL}{path}"
-    req_params = params.copy() if params else {}
-    req_data = data.copy() if data else {}
-    
-    default_headers = {}
-    if headers:
-        default_headers.update(headers)
-        
-    if signed:
-        api_key, secret = _get_mexc_keys()
-        default_headers["X-MEXC-APIKEY"] = api_key
-        
-        # 1. Preparar parámetros para la firma
-        timestamp = str(int(time.time() * 1000))
-        
-        # Combinar todos los parámetros para la firma
-        sign_params = {**req_params, **req_data}
-        sign_params["timestamp"] = timestamp
-        sign_params["recvWindow"] = MEXC_RECV_WINDOW
-        
-        # 2. Generar totalParams: Ordenar alfabéticamente y unir con '&'
-        total_params = urlencode(sign_params)
-        
-        # 3. Generar la firma y agregarla a los parámetros
-        signature = _sign_request(secret, total_params)
-        sign_params["signature"] = signature
-        
-        # 4. Asignar parámetros al lugar correcto
-        if method.upper() in ["GET", "DELETE"]:
-            # Para GET/DELETE, todos los parámetros firmados van en la query string
-            req_params.update(sign_params)
-            req_data = None
-            
-        elif method.upper() in ["POST", "PUT"]:
-            # Para POST/PUT, los parámetros firmados van en el cuerpo (form-urlencoded)
-            default_headers["Content-Type"] = "application/x-www-form-urlencoded"
-            req_data = urlencode(sign_params)
-
-    try:
-        # Petición
-        if method.upper() == "GET":
-            response = requests.get(url, params=req_params, headers=default_headers, timeout=10)
-        elif method.upper() == "POST":
-            response = requests.post(url, params=req_params, data=req_data, headers=default_headers, timeout=10)
-        elif method.upper() == "DELETE":
-            response = requests.delete(url, params=req_params, headers=default_headers, timeout=10)
-        else:
-            raise NotImplementedError(f"Método HTTP no soportado: {method}")
-
-        response.raise_for_status()
-        return response.json()
-        
-    except requests.exceptions.HTTPError as e:
-        error_msg = f"MEXC HTTP Error {response.status_code}"
-        try:
-            error_json = response.json()
-            error_msg += f": {error_json.get('msg', error_json)}"
-        except json.JSONDecodeError:
-            error_msg += f": {response.text}"
-        print(f"❌ {error_msg}")
-        raise Exception(error_msg) from e
-    except requests.exceptions.RequestException as e:
-        print(f"❌ ERROR de Solicitud: {e}")
-        raise Exception(f"Error en la solicitud a MEXC: {e}") from e
+MEXC_BASE_URL = os.getenv("MEXC_BASE_URL", "https://contract.mexc.com")
+MEXC_API_KEY = os.getenv("MEXC_API_KEY", "")
+MEXC_API_SECRET = os.getenv("MEXC_API_SECRET", "")
+MEXC_RECV_WINDOW = os.getenv("MEXC_RECV_WINDOW", "10000")  # ms, <= 60000 recomendado
 
 # =========================
 # Normalización de símbolo (Regla A)
 # =========================
 # 👇 Añade este diccionario cerca de normalize_symbol
 SPECIAL_SYMBOL_MAP = {
-    "OPENLEDGER": "OPEN",   # Unifica el ticker a OPEN
+    "OPENLEDGER": "OPEN",  # Unifica el ticker a OPEN
     # agrega aquí otros alias si los necesitas...
 }
+
+
+# =========================
+# Normalización de símbolo (Regla A)
+# =========================
+# 👇 Añade este diccionario cerca de normalize_symbol
+SPECIAL_SYMBOL_MAP = {
+    "OPENLEDGER": "OPEN",  # Unifica el ticker a OPEN
+    # agrega aquí otros alias si los necesitas...
+}
+
 
 def normalize_symbol(sym: str) -> str:
     if not sym:
         return ""
     s = sym.upper().strip()
-    s = re.sub(r'^PERP_', '', s)
-    s = re.sub(r'(_|-)?(USDT|USDC|USD|PERP)$', '', s)   # quita sufijos + separador
-    s = re.sub(r'[_-]+$', '', s)                        # guiones finales
-    base = re.split(r'[_-]', s)[0]                      # primera parte (KAITO_USDC -> KAITO)
+    s = re.sub(r"^PERP_", "", s)
+    s = re.sub(r"(_|-)?(USDT|USDC|USD|PERP)$", "", s)  # quita sufijos + separador
+    s = re.sub(r"[_-]+$", "", s)  # guiones finales
+    base = re.split(r"[_-]", s)[0]  # primera parte (KAITO_USDC -> KAITO)
     # 👇 Aplica alias especiales
     base = SPECIAL_SYMBOL_MAP.get(base, base)
     return base
+
+
 # =========================
 # Helpers HTTP / firma / backoff
 # =========================
 
 
-
-
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
+
 def _has_creds() -> bool:
     return bool(MEXC_API_KEY and MEXC_API_SECRET)
+
 
 def _param_str_for_get(params: Optional[Dict[str, Any]]) -> str:
     """GET/DELETE → concatenación en orden lexicográfico k=v con URL-encode y &."""
     if not params:
         return ""
     # params con valores None no participan
-    items = [(k, "" if v is None else str(v)) for k, v in params.items() if v is not None]
+    items = [
+        (k, "" if v is None else str(v)) for k, v in params.items() if v is not None
+    ]
     items.sort(key=lambda kv: kv[0])
     return "&".join(f"{kv[0]}={quote(kv[1], safe='')}" for kv in items)
+
 
 def _mexc_signature(param_str: str, ts: str) -> str:
     """
@@ -201,8 +110,11 @@ def _mexc_signature(param_str: str, ts: str) -> str:
       signature = HMAC_SHA256(secret, sign_target) → hex lower
     """
     target = f"{MEXC_API_KEY}{ts}{param_str}"
-    digest = hmac.new(MEXC_API_SECRET.encode("utf-8"), target.encode("utf-8"), hashlib.sha256).hexdigest()
+    digest = hmac.new(
+        MEXC_API_SECRET.encode("utf-8"), target.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
     return digest
+
 
 def _headers(ts: str, signature: Optional[str]) -> Dict[str, str]:
     hdrs = {
@@ -216,6 +128,7 @@ def _headers(ts: str, signature: Optional[str]) -> Dict[str, str]:
         hdrs["Signature"] = signature
     return hdrs
 
+
 def _request(
     method: str,
     path: str,
@@ -223,7 +136,7 @@ def _request(
     private: bool = False,
     timeout: int = 25,
     max_retries: int = 3,
-    retry_backoff: float = 0.75
+    retry_backoff: float = 0.75,
 ) -> Dict[str, Any]:
     """
     Cliente con firma y backoff. GET params se pasan también en la URL.
@@ -259,13 +172,20 @@ def _request(
             elif method.upper() == "DELETE":
                 r = requests.delete(url, headers=headers, timeout=timeout)
             else:
-                r = requests.post(url, headers=headers, data=json.dumps(params) if params else "{}", timeout=timeout)
+                r = requests.post(
+                    url,
+                    headers=headers,
+                    data=json.dumps(params) if params else "{}",
+                    timeout=timeout,
+                )
             r.raise_for_status()
             data = r.json() if r.text else {}
             # Protocolo MEXC common
             if isinstance(data, dict) and not data.get("success", True):
                 # algunos endpoints devuelven success=false + code/message
-                raise RuntimeError(f"MEXC error: code={data.get('code')} msg={data.get('message')}")
+                raise RuntimeError(
+                    f"MEXC error: code={data.get('code')} msg={data.get('message')}"
+                )
             return data
         except Exception as e:
             last_err = e
@@ -274,6 +194,7 @@ def _request(
             time.sleep(retry_backoff * attempt)
     # si sale del loop
     raise last_err or RuntimeError("MEXC request failed")
+
 
 # ============
 # Precios mark
@@ -300,19 +221,21 @@ def _get_mark_price_fast(symbol: str) -> Optional[float]:
             "/api/v1/contract/ticker",
             {"symbol": sym},
             private=False,
-            timeout=2,          # << muy agresivo
-            max_retries=1       # << sin reintentos
+            timeout=2,  # << muy agresivo
+            max_retries=1,  # << sin reintentos
         )
         d = data.get("data")
         if isinstance(d, dict):
             for k in ("fairPrice", "lastPrice", "last"):
                 if d.get(k) is not None:
-                    price = float(d[k]); break
+                    price = float(d[k])
+                    break
         elif isinstance(d, list) and d:
             x = d[0]
             for k in ("fairPrice", "lastPrice", "last"):
                 if x.get(k) is not None:
-                    price = float(x[k]); break
+                    price = float(x[k])
+                    break
     except Exception:
         price = None
 
@@ -330,6 +253,7 @@ def _pnl_unrealized(entry: float, mark: float, size: float, side: str) -> float:
     # long
     return (mark - entry) * size
 
+
 def _safe_float(x, default=0.0) -> float:
     try:
         v = float(x)
@@ -338,6 +262,7 @@ def _safe_float(x, default=0.0) -> float:
         return default
     except Exception:
         return default
+
 
 # =========================
 # BALANCES (Regla D exacta)
@@ -373,17 +298,23 @@ def fetch_mexc_all_balances() -> Dict[str, Any]:
     try:
         resp = _request("GET", "/api/v1/private/account/assets", private=True)
         data = resp.get("data")
-        rows = data if isinstance(data, list) else ([data] if isinstance(data, dict) else [])
+        rows = (
+            data
+            if isinstance(data, list)
+            else ([data] if isinstance(data, dict) else [])
+        )
         eq = bal = unrl = init_m = 0.0
         futures_bucket = 0.0
         for row in rows:
             cur = (row.get("currency") or "").upper()
             # contrato MEXC suele ser USDT; sumo solo stables visibles
             if cur in ("USDT", "USDC", "USD", ""):
-                eq      += _safe_float(row.get("equity", 0))
-                bal     += _safe_float(row.get("availableBalance", row.get("cashBalance", 0)))
-                unrl    += _safe_float(row.get("unrealized", 0))
-                init_m  += _safe_float(row.get("positionMargin", 0))
+                eq += _safe_float(row.get("equity", 0))
+                bal += _safe_float(
+                    row.get("availableBalance", row.get("cashBalance", 0))
+                )
+                unrl += _safe_float(row.get("unrealized", 0))
+                init_m += _safe_float(row.get("positionMargin", 0))
         futures_bucket = eq
         return {
             "exchange": "mexc",
@@ -407,6 +338,7 @@ def fetch_mexc_all_balances() -> Dict[str, Any]:
             "margin": 0.0,
             "futures": 0.0,
         }
+
 
 # =========================
 # OPEN POSITIONS (Regla B exacta)
@@ -440,7 +372,12 @@ def fetch_mexc_open_positions(symbol: Optional[str] = None) -> List[Dict[str, An
         params = {}
         if symbol:
             params["symbol"] = symbol
-        resp = _request("GET", "/api/v1/private/position/open_positions", params=params, private=True)
+        resp = _request(
+            "GET",
+            "/api/v1/private/position/open_positions",
+            params=params,
+            private=True,
+        )
         rows = resp.get("data", []) if isinstance(resp, dict) else []
         out: List[Dict[str, Any]] = []
         for r in rows:
@@ -453,45 +390,50 @@ def fetch_mexc_open_positions(symbol: Optional[str] = None) -> List[Dict[str, An
             if mark is None:
                 # fallback ultrarrápido: si la API no da mark, no nos bloqueamos
                 mark = _safe_float(r.get("closeAvgPrice", 0)) or entry
-            liq  = _safe_float(r.get("liquidatePrice", 0))
+            liq = _safe_float(r.get("liquidatePrice", 0))
             notional = abs(size) * entry
             funding = _safe_float(r.get("holdFee", 0))  # holding fee = funding (+ / -)
-            fee_acc = _safe_float(r.get("fee", 0))         # comisiones de la posición (tu ejemplo: -2.9306)
+            fee_acc = _safe_float(
+                r.get("fee", 0)
+            )  # comisiones de la posición (tu ejemplo: -2.9306)
             # La api no devuelve unreal, y a veces el size viene mal, asi que el calculo suele fallar.
             unreal = _pnl_unrealized(entry, mark, abs(size), side)
             # realised de la API: “incluye todo” según tu observación (pnl de precio + fees + funding)
             realized_open = _safe_float(r.get("realised", fee_acc + funding))
-            out.append({
-                "exchange": "mexc",
-                "symbol": normalize_symbol(raw_sym),
-                "side": side,
-                "size": abs(size),
-                "entry_price": entry,
-                "mark_price": mark,
-                "liquidation_price": liq,
-                "notional": notional,
-                "unrealized_pnl": unreal,
-            
-                # === fees/funding ===
-                "fee": fee_acc,                 # comisiones de trade (este endpoint no las trae)
-                "fees": fee_acc,            # 👈 alias para que la UI muestre algo (holdFee)
-                "funding_fee": funding,     # como ya tenías
-                "funding": funding,         # alias extra por si el front lo espera
-            
-                "realized_pnl": realized_open,
-            })
+            out.append(
+                {
+                    "exchange": "mexc",
+                    "symbol": normalize_symbol(raw_sym),
+                    "side": side,
+                    "size": abs(size),
+                    "entry_price": entry,
+                    "mark_price": mark,
+                    "liquidation_price": liq,
+                    "notional": notional,
+                    "unrealized_pnl": unreal,
+                    # === fees/funding ===
+                    "fee": fee_acc,  # comisiones de trade (este endpoint no las trae)
+                    "fees": fee_acc,  # 👈 alias para que la UI muestre algo (holdFee)
+                    "funding_fee": funding,  # como ya tenías
+                    "funding": funding,  # alias extra por si el front lo espera
+                    "realized_pnl": realized_open,
+                }
+            )
         return out
     except Exception as e:
         print(f"❌ MEXC open positions error: {e}")
         return []
 
+
 # =========================
 # FUNDING HISTORY (Regla C exacta)
 # =========================
-def fetch_mexc_funding_fees(limit: int = 1000,
-                            symbol: Optional[str] = None,
-                            since: Optional[int] = None,
-                            max_pages: int = 100) -> List[Dict[str, Any]]:
+def fetch_mexc_funding_fees(
+    limit: int = 1000,
+    symbol: Optional[str] = None,
+    since: Optional[int] = None,
+    max_pages: int = 100,
+) -> List[Dict[str, Any]]:
     """
     GET /api/v1/private/position/funding_records (rate: 20 req / 2s)
     - Si 'since' está definido (ms epoch), pagina hacia atrás hasta cruzar ese corte temporal.
@@ -511,8 +453,12 @@ def fetch_mexc_funding_fees(limit: int = 1000,
             if symbol:
                 params["symbol"] = symbol
 
-            resp = _request("GET", "/api/v1/private/position/funding_records",
-                            params=params, private=True)
+            resp = _request(
+                "GET",
+                "/api/v1/private/position/funding_records",
+                params=params,
+                private=True,
+            )
             d = resp.get("data", {}) if isinstance(resp, dict) else {}
             rows = d.get("resultList", []) or []
             if not rows:
@@ -524,15 +470,17 @@ def fetch_mexc_funding_fees(limit: int = 1000,
                 if cutoff and ts < cutoff:
                     # Es más viejo que el corte → saltamos este item
                     continue
-                acc.append({
-                    "exchange": "mexc",
-                    "symbol": normalize_symbol(it.get("symbol", "")),
-                    "income": _safe_float(it.get("funding", 0)),
-                    "asset": "USDT",
-                    "timestamp": ts,  # ms
-                    "funding_rate": _safe_float(it.get("rate", 0)),
-                    "type": "FUNDING_FEE",
-                })
+                acc.append(
+                    {
+                        "exchange": "mexc",
+                        "symbol": normalize_symbol(it.get("symbol", "")),
+                        "income": _safe_float(it.get("funding", 0)),
+                        "asset": "USDT",
+                        "timestamp": ts,  # ms
+                        "funding_rate": _safe_float(it.get("rate", 0)),
+                        "type": "FUNDING_FEE",
+                    }
+                )
                 if len(acc) >= int(limit or 10**9):
                     return acc
 
@@ -554,11 +502,18 @@ def fetch_mexc_funding_fees(limit: int = 1000,
         print(f"❌ MEXC funding error: {e}")
         return acc
 
-#=========Closed positions
 
-def _adjust_size_scale(size_raw: float, entry: float, close: float,
-                       target_price_component: float, side: str,
-                       rel_tol: float = 0.05):
+# =========Closed positions
+
+
+def _adjust_size_scale(
+    size_raw: float,
+    entry: float,
+    close: float,
+    target_price_component: float,
+    side: str,
+    rel_tol: float = 0.05,
+):
     """
     Ajusta size por potencias de 10 para aproximar el PnL de precio
     al 'target_price_component' (≈ realised - funding - fee_explicit).
@@ -578,11 +533,13 @@ def _adjust_size_scale(size_raw: float, entry: float, close: float,
             best = (err, s, f)
     return best[1], best[2], best[0]
 
+
 def _price_pnl(side: str, entry: float, close: float, size: float) -> float:
     side = (side or "").lower()
     if side == "short":
         return (entry - close) * abs(size)
     return (close - entry) * abs(size)
+
 
 def _row_to_closed_payload(r: Dict[str, Any]) -> Dict[str, Any]:
     raw_sym = r.get("symbol", "")
@@ -594,11 +551,11 @@ def _row_to_closed_payload(r: Dict[str, Any]) -> Dict[str, Any]:
 
     # ✅ CALCULAR SIZE USANDO LA LÓGICA DEL DEBUG - PRIORIDAD CORREGIDA
     size = 0.0
-    
+
     # Obtener los valores base
     close_vol = _safe_float(r.get("closeVol", 0.0))
     hold_vol = _safe_float(r.get("holdVol", 0.0))
-    
+
     # Funding y realized TOTAL (neto)
     funding_total = _safe_float(r.get("holdFee", 0))
     realized_total = _safe_float(r.get("realised", 0))
@@ -611,30 +568,42 @@ def _row_to_closed_payload(r: Dict[str, Any]) -> Dict[str, Any]:
             break
 
     # Calcular target_price_component (≈ realised - funding - fee_explicit)
-    target_price_component = realized_total - funding_total - (fee_explicit if fee_explicit is not None else 0.0)
+    target_price_component = (
+        realized_total
+        - funding_total
+        - (fee_explicit if fee_explicit is not None else 0.0)
+    )
 
     # Elegir el size base: preferir closeVol, luego holdVol
     size_base = close_vol if close_vol > 0 else hold_vol
-    
+
     # Aplicar ajuste de escala (la clave del debug)
-    if size_base > 0 and abs(target_price_component) > 1e-8 and abs(close - entry) > 1e-8:
+    if (
+        size_base > 0
+        and abs(target_price_component) > 1e-8
+        and abs(close - entry) > 1e-8
+    ):
         size_scaled, scale_factor, error = _adjust_size_scale(
             size_base, entry, close, target_price_component, side, rel_tol=0.05
         )
-        
+
         # Usar el size escalado si el error es razonable
         if error < 0.2:  # 20% de tolerancia
             size = size_scaled
-            print(f"         📏 Usando size_after_scale: {size} (factor: {scale_factor}, error: {error:.2%})")
+            print(
+                f"         📏 Usando size_after_scale: {size} (factor: {scale_factor}, error: {error:.2%})"
+            )
         else:
             size = size_base
-            print(f"         📏 Usando size base (error muy alto): {size} (error: {error:.2%})")
+            print(
+                f"         📏 Usando size base (error muy alto): {size} (error: {error:.2%})"
+            )
     else:
         # Si no podemos calcular el scale, usar el size base
         size = size_base
         if size > 0:
             print(f"         📏 Usando size base: {size}")
-    
+
     # Si aún no tenemos tamaño válido, usar reconstrucción básica
     if size <= 0:
         diff = abs(close - entry)
@@ -668,25 +637,24 @@ def _row_to_closed_payload(r: Dict[str, Any]) -> Dict[str, Any]:
         "exchange": "mexc",
         "symbol": normalize_symbol(raw_sym),
         "side": side,
-        "size": float(size),                 # 👈 Tamaño corregido con lógica del debug
+        "size": float(size),  # 👈 Tamaño corregido con lógica del debug
         "entry_price": float(entry),
         "close_price": float(close),
         "open_time": open_s,
         "close_time": close_s,
-
         "realized_pnl": float(realized_total),
         "funding_total": float(funding_total),
         "fee_total": float(fee_total),
-
-        "pnl": float(price_pnl),            
+        "pnl": float(price_pnl),
         "notional": float(notional),
         "leverage": float(lev) if lev else None,
         "liquidation_price": float(liq) if liq else None,
     }
 
 
-
-def _iter_history_positions(days: int = 60, symbol: Optional[str] = None, max_pages: int = 10) -> List[Dict[str, Any]]:
+def _iter_history_positions(
+    days: int = 60, symbol: Optional[str] = None, max_pages: int = 10
+) -> List[Dict[str, Any]]:
     """GET api/v1/private/position/list/history_positions con paginación defensiva."""
     acc: List[Dict[str, Any]] = []
     page_num = 1
@@ -696,17 +664,28 @@ def _iter_history_positions(days: int = 60, symbol: Optional[str] = None, max_pa
         params = {"page_num": page_num, "page_size": page_size}
         if symbol:
             params["symbol"] = symbol
-        resp = _request("GET", "/api/v1/private/position/list/history_positions", params=params, private=True)
-        
+        resp = _request(
+            "GET",
+            "/api/v1/private/position/list/history_positions",
+            params=params,
+            private=True,
+        )
+
         # DEBUG TEMPORAL: Ver estructura de la respuesta
         if page_num == 1 and not acc:
             print("🔍 DEBUG: Estructura de respuesta MEXC:")
             print(f"   Tipo de data: {type(resp.get('data'))}")
-            if isinstance(resp.get('data'), dict):
-                sample_row = resp['data'].get('resultList', [{}])[0] if resp['data'].get('resultList') else {}
+            if isinstance(resp.get("data"), dict):
+                sample_row = (
+                    resp["data"].get("resultList", [{}])[0]
+                    if resp["data"].get("resultList")
+                    else {}
+                )
                 print(f"   Campos disponibles: {list(sample_row.keys())}")
-                if 'size_after_scale' in sample_row:
-                    print(f"   ✅ size_after_scale disponible: {sample_row['size_after_scale']}")
+                if "size_after_scale" in sample_row:
+                    print(
+                        f"   ✅ size_after_scale disponible: {sample_row['size_after_scale']}"
+                    )
                 else:
                     print("   ❌ size_after_scale NO disponible")
         # Formatos posibles: {"success":true,"data":[...]} o data:{resultList:[...]}
@@ -730,7 +709,7 @@ def _iter_history_positions(days: int = 60, symbol: Optional[str] = None, max_pa
             break
         page_num += 1
     return acc
- 
+
 
 # def _iter_history_positions(days: int = 60, symbol: Optional[str] = None, max_pages: int = 10) -> List[Dict[str, Any]]:
 #     """GET api/v1/private/position/list/history_positions con paginación defensiva."""
@@ -766,7 +745,9 @@ def _iter_history_positions(days: int = 60, symbol: Optional[str] = None, max_pa
 #     return acc
 
 
-def save_mexc_closed_positions(db_path: str = "portfolio.db", days: int = 10, debug: bool = True) -> int:
+def save_mexc_closed_positions(
+    db_path: str = "portfolio.db", days: int = 10, debug: bool = True
+) -> int:
     try:
         import sqlite3
         from db_manager import save_closed_position
@@ -791,31 +772,48 @@ def save_mexc_closed_positions(db_path: str = "portfolio.db", days: int = 10, de
                 pos = _row_to_closed_payload(r)
 
                 # ¿Existe ya? (clave natural)
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT id FROM closed_positions
                     WHERE exchange = ? AND symbol = ? AND close_time = ?
-                """, (pos["exchange"], pos["symbol"], pos["close_time"]))
+                """,
+                    (pos["exchange"], pos["symbol"], pos["close_time"]),
+                )
                 row = cur.fetchone()
 
                 if row:
                     # 🔁 Reemplazar para aplicar el size corregido
-                    cur.execute("""
+                    cur.execute(
+                        """
                         DELETE FROM closed_positions
                         WHERE id = ?
-                    """, (row[0],))
+                    """,
+                        (row[0],),
+                    )
                     conn.commit()
                     replaced += 1
                     if debug:
-                        print(f"🔁 Reemplazando duplicado: {pos['symbol']} close_time={pos['close_time']}")
+                        print(
+                            f"🔁 Reemplazando duplicado: {pos['symbol']} close_time={pos['close_time']}"
+                        )
 
                 # Insert centralizado (db_manager recalcula métricas)
                 save_closed_position(pos)
                 saved += 1
 
                 if debug:
-                    src = "size_after_scale" if r.get("size_after_scale") not in (None, "", 0, "0") else \
-                          ("closeVol" if r.get("closeVol") else ("holdVol" if r.get("holdVol") else "reconstructed"))
-                    print(f"✅ MEXC cerrada: {pos['symbol']} {pos['side']} size={pos['size']} (src={src}) t={pos['close_time']}")
+                    src = (
+                        "size_after_scale"
+                        if r.get("size_after_scale") not in (None, "", 0, "0")
+                        else (
+                            "closeVol"
+                            if r.get("closeVol")
+                            else ("holdVol" if r.get("holdVol") else "reconstructed")
+                        )
+                    )
+                    print(
+                        f"✅ MEXC cerrada: {pos['symbol']} {pos['side']} size={pos['size']} (src={src}) t={pos['close_time']}"
+                    )
 
             except Exception as e:
                 print(f"❌ Error guardando posición MEXC {r.get('symbol', '')}: {e}")
@@ -830,19 +828,22 @@ def save_mexc_closed_positions(db_path: str = "portfolio.db", days: int = 10, de
         return 0
 
 
-
-
 # =========================
 # Smoke tests CLI
 # =========================
 
 # === DEBUG TOGGLE ===
-MEXC_DEBUG = str(os.getenv("MEXC_DEBUG", "0")).lower() in ("1","true","yes")
+MEXC_DEBUG = str(os.getenv("MEXC_DEBUG", "0")).lower() in ("1", "true", "yes")
+
+
 def _dbg(*a):
     if MEXC_DEBUG:
         print("[MEXC DEBUG]", *a)
 
-def debug_dump_mexc_history_raw(days: int = 60, symbol: Optional[str] = None, limit: int = 50):
+
+def debug_dump_mexc_history_raw(
+    days: int = 60, symbol: Optional[str] = None, limit: int = 50
+):
     """
     Imprime filas crudas de /position/list/history_positions con todos los campos relevantes
     y compara tamaños: closeVol, holdVol y reconstrucción por PnL.
@@ -853,24 +854,26 @@ def debug_dump_mexc_history_raw(days: int = 60, symbol: Optional[str] = None, li
         if count >= limit:
             break
         # Crudos
-        raw_sym = r.get("symbol","")
+        raw_sym = r.get("symbol", "")
         entry = _safe_float(r.get("openAvgPrice", r.get("holdAvgPrice", 0)))
         close = _safe_float(r.get("closeAvgPrice", entry))
-        side  = "long" if int(_safe_float(r.get("positionType", 1))) == 1 else "short"
+        side = "long" if int(_safe_float(r.get("positionType", 1))) == 1 else "short"
         closeVol = _safe_float(r.get("closeVol", 0))
-        holdVol  = _safe_float(r.get("holdVol", 0))
+        holdVol = _safe_float(r.get("holdVol", 0))
         realised = _safe_float(r.get("realised", 0))
-        holdFee  = _safe_float(r.get("holdFee", 0))
-        lev      = _safe_float(r.get("leverage", 0))
-        im       = _safe_float(r.get("im", r.get("oim", 0)))
+        holdFee = _safe_float(r.get("holdFee", 0))
+        lev = _safe_float(r.get("leverage", 0))
+        im = _safe_float(r.get("im", r.get("oim", 0)))
         fee_explicit = None
-        for k in ("closeFee","fee","poundage","realisedFee","commission"):
+        for k in ("closeFee", "fee", "poundage", "realisedFee", "commission"):
             if r.get(k) is not None:
                 fee_explicit = _safe_float(r.get(k))
                 break
 
         # Objetivo de PnL precio (si hay fee explícita, restarla)
-        approx_price_component = realised - holdFee - (fee_explicit if fee_explicit is not None else 0.0)
+        approx_price_component = (
+            realised - holdFee - (fee_explicit if fee_explicit is not None else 0.0)
+        )
         diff = abs(close - entry)
 
         def price_pnl(sz):
@@ -879,46 +882,74 @@ def debug_dump_mexc_history_raw(days: int = 60, symbol: Optional[str] = None, li
             return (close - entry) * abs(sz)
 
         pp_close = price_pnl(closeVol) if closeVol else 0.0
-        pp_hold  = price_pnl(holdVol)  if holdVol  else 0.0
+        pp_hold = price_pnl(holdVol) if holdVol else 0.0
 
         _dbg("---- ROW ----")
         _dbg("symbol:", raw_sym, "side:", side)
         _dbg("prices:", {"entry": entry, "close": close, "Δ": diff})
         _dbg("volumes:", {"closeVol": closeVol, "holdVol": holdVol})
-        _dbg("wallet:", {"realised": realised, "holdFee": holdFee, "fee_explicit": fee_explicit, "lev": lev, "im": im})
-        _dbg("price_pnl_from_closeVol:", pp_close, "price_pnl_from_holdVol:", pp_hold, "target≈", approx_price_component)
+        _dbg(
+            "wallet:",
+            {
+                "realised": realised,
+                "holdFee": holdFee,
+                "fee_explicit": fee_explicit,
+                "lev": lev,
+                "im": im,
+            },
+        )
+        _dbg(
+            "price_pnl_from_closeVol:",
+            pp_close,
+            "price_pnl_from_holdVol:",
+            pp_hold,
+            "target≈",
+            approx_price_component,
+        )
 
-        print(json.dumps({
-            "symbol": raw_sym,
-            "side": side,
-            "entry": entry,
-            "close": close,
-            "closeVol": closeVol,
-            "holdVol": holdVol,
-            "realised": realised,
-            "holdFee": holdFee,
-            "fee_explicit": fee_explicit,
-            "leverage": lev,
-            "im": im,
-            "price_pnl_closeVol": pp_close,
-            "price_pnl_holdVol": pp_hold,
-            "target_price_component": approx_price_component,
-            "createTime": r.get("createTime"),
-            "updateTime": r.get("updateTime"),
-        }, ensure_ascii=False))
+        print(
+            json.dumps(
+                {
+                    "symbol": raw_sym,
+                    "side": side,
+                    "entry": entry,
+                    "close": close,
+                    "closeVol": closeVol,
+                    "holdVol": holdVol,
+                    "realised": realised,
+                    "holdFee": holdFee,
+                    "fee_explicit": fee_explicit,
+                    "leverage": lev,
+                    "im": im,
+                    "price_pnl_closeVol": pp_close,
+                    "price_pnl_holdVol": pp_hold,
+                    "target_price_component": approx_price_component,
+                    "createTime": r.get("createTime"),
+                    "updateTime": r.get("updateTime"),
+                },
+                ensure_ascii=False,
+            )
+        )
         count += 1
+
+
 def _ts_iso(ms: int) -> str:
     try:
-        return datetime.fromtimestamp(int(ms)/1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+        return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S %Z"
+        )
     except Exception:
         return str(ms)
 
-def debug_dump_mexc_funding(days: int = 60,
-                            symbol: Optional[str] = None,
-                            max_pages: int = 15,
-                            page_size: int = 100,
-                            print_rows: int = 3,
-                            raw: bool = False) -> None:
+
+def debug_dump_mexc_funding(
+    days: int = 60,
+    symbol: Optional[str] = None,
+    max_pages: int = 15,
+    page_size: int = 100,
+    print_rows: int = 3,
+    raw: bool = False,
+) -> None:
     """
     Imprime respuesta cruda y un resumen por página del endpoint:
       GET /api/v1/private/position/funding_records
@@ -934,7 +965,9 @@ def debug_dump_mexc_funding(days: int = 60,
         return
 
     print("============== MEXC FUNDING DEBUG ==============")
-    print(f"params: days={days}, symbol={symbol}, max_pages={max_pages}, page_size={page_size}, raw={raw}")
+    print(
+        f"params: days={days}, symbol={symbol}, max_pages={max_pages}, page_size={page_size}, raw={raw}"
+    )
     now_ms = int(time.time() * 1000)
     since_ms = now_ms - days * 24 * 3600 * 1000
     print(f"now:   {_ts_iso(now_ms)}")
@@ -950,8 +983,12 @@ def debug_dump_mexc_funding(days: int = 60,
             params["symbol"] = symbol
 
         try:
-            resp = _request("GET", "/api/v1/private/position/funding_records",
-                            params=params, private=True)
+            resp = _request(
+                "GET",
+                "/api/v1/private/position/funding_records",
+                params=params,
+                private=True,
+            )
         except Exception as e:
             print(f"❌ request error page={page_num}: {e}")
             break
@@ -963,18 +1000,26 @@ def debug_dump_mexc_funding(days: int = 60,
         page_sz = int(_safe_float(d.get("pageSize", 0)))
         total_count = int(_safe_float(d.get("totalCount", 0)))
 
-        print(f"--- PAGE {current_page}/{total_page or '?'}  count={len(lst)}  (api.pageSize={page_sz}  api.totalCount={total_count})")
+        print(
+            f"--- PAGE {current_page}/{total_page or '?'}  count={len(lst)}  (api.pageSize={page_sz}  api.totalCount={total_count})"
+        )
 
         if raw and page_num == 1:
-            print("RAW first page data:", json.dumps(d, ensure_ascii=False)[:2000], "...\n")
+            print(
+                "RAW first page data:",
+                json.dumps(d, ensure_ascii=False)[:2000],
+                "...\n",
+            )
 
         # imprime una muestra corta de filas
         for it in lst[:print_rows]:
             ts = int(_safe_float(it.get("settleTime", 0)))
-            s  = it.get("symbol", "")
+            s = it.get("symbol", "")
             inc = _safe_float(it.get("funding", 0))
-            rt  = _safe_float(it.get("rate", 0))
-            print(f"   · {s:<16}  funding={inc:<12} rate={rt:<10} settleTime={_ts_iso(ts)}")
+            rt = _safe_float(it.get("rate", 0))
+            print(
+                f"   · {s:<16}  funding={inc:<12} rate={rt:<10} settleTime={_ts_iso(ts)}"
+            )
 
             # actualiza min/max
             if ts:
@@ -1003,30 +1048,47 @@ def debug_dump_mexc_funding(days: int = 60,
     else:
         print("rango_en_resultado: (sin timestamps)")
     print("====================================\n")
-        
-        
+
+
 if __name__ == "__main__":
     import argparse
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true", default=True)
     ap.add_argument("--days", type=int, default=3)
     ap.add_argument("--symbol", type=str, default=None)
 
     # 🔎 nuevos flags de debug funding
-    ap.add_argument("--funding-debug", action="store_true", help="Imprime debug de funding por páginas")
-    ap.add_argument("--f-days", type=int, default=60, help="Ventana informativa de días hacia atrás")
-    ap.add_argument("--f-symbol", type=str, default=None, help="Símbolo MEXC (p.ej. BTC_USDT)")
-    ap.add_argument("--f-max-pages", type=int, default=100, help="Máximo de páginas a recorrer")
-    ap.add_argument("--f-page-size", type=int, default=100, help="Tamaño de página (max 100)")
-    ap.add_argument("--f-raw", action="store_true", help="Mostrar JSON crudo de la primera página")
+    ap.add_argument(
+        "--funding-debug",
+        action="store_true",
+        help="Imprime debug de funding por páginas",
+    )
+    ap.add_argument(
+        "--f-days", type=int, default=60, help="Ventana informativa de días hacia atrás"
+    )
+    ap.add_argument(
+        "--f-symbol", type=str, default=None, help="Símbolo MEXC (p.ej. BTC_USDT)"
+    )
+    ap.add_argument(
+        "--f-max-pages", type=int, default=100, help="Máximo de páginas a recorrer"
+    )
+    ap.add_argument(
+        "--f-page-size", type=int, default=100, help="Tamaño de página (max 100)"
+    )
+    ap.add_argument(
+        "--f-raw", action="store_true", help="Mostrar JSON crudo de la primera página"
+    )
     args = ap.parse_args()
 
     if args.funding_debug:
-        debug_dump_mexc_funding(days=args.f_days,
-                                symbol=args.f_symbol,
-                                max_pages=args.f_max_pages,
-                                page_size=args.f_page_size,
-                                raw=args.f_raw)
+        debug_dump_mexc_funding(
+            days=args.f_days,
+            symbol=args.f_symbol,
+            max_pages=args.f_max_pages,
+            page_size=args.f_page_size,
+            raw=args.f_raw,
+        )
         raise SystemExit(0)
 
     print("== balances ==")

@@ -10,15 +10,17 @@ import re
 from urllib.parse import urlencode
 import json
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # --- asegurar que podamos importar db_manager desde la carpeta raíz ---
 import sys
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)  # carpeta raíz del proyecto
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-#====== Imports para prints
+# ====== Imports para prints
 # from pp import (
 #     p_closed_debug_header, p_closed_debug_count, p_closed_debug_norm_size,
 #     p_closed_debug_prices, p_closed_debug_pnl, p_closed_debug_times, p_closed_debug_normalized,
@@ -26,7 +28,7 @@ if ROOT not in sys.path:
 #     p_funding_fetching, p_funding_count,
 #     p_balance_equity
 # )
-#===========================
+# ===========================
 
 # Configuración
 BITGET_API_KEY = os.getenv("BITGET_API_KEY")
@@ -36,39 +38,124 @@ BITGET_BASE_URL = "https://api.bitget.com"
 
 __all__ = [
     "fetch_bitget_all_balances",
-    "fetch_bitget_open_positions", 
+    "fetch_bitget_open_positions",
     "fetch_bitget_funding_fees",
-    "save_bitget_closed_positions"
+    "save_bitget_closed_positions",
 ]
+
+# ========== MARGIN TRACKING CACHE ==========
+
+import sqlite3
+from pathlib import Path
+
+
+def _init_bitget_margin_cache(db_path: str = "cache.db"):
+    """Initialize margin tracking table for Bitget positions"""
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bitget_position_margin_tracking (
+            symbol TEXT PRIMARY KEY,
+            init_margin REAL NOT NULL,
+            first_seen_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+    """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _get_init_margin(
+    symbol: str, current_margin: float, db_path: str = "cache.db"
+) -> tuple[float, float]:
+    """
+    Get or set initial margin for a Bitget position.
+
+    Returns:
+        (init_margin, main_margin) tuple
+        - init_margin: First recorded margin (never changes)
+        - main_margin: Current margin (updated each time)
+    """
+    _init_bitget_margin_cache(db_path)
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    # Check if position already exists
+    cursor.execute(
+        "SELECT init_margin FROM bitget_position_margin_tracking WHERE symbol = ?",
+        (symbol,),
+    )
+    row = cursor.fetchone()
+
+    timestamp = int(time.time())
+
+    if row:
+        # Position exists - init_margin stays the same, main_margin is current
+        init_margin = row[0]
+        main_margin = current_margin
+
+        # Update timestamp
+        cursor.execute(
+            "UPDATE bitget_position_margin_tracking SET updated_at = ? WHERE symbol = ?",
+            (timestamp, symbol),
+        )
+    else:
+        # First time seeing this position - both are the same
+        init_margin = current_margin
+        main_margin = current_margin
+
+        # Insert new record
+        cursor.execute(
+            """INSERT INTO bitget_position_margin_tracking 
+               (symbol, init_margin, first_seen_at, updated_at) 
+               VALUES (?, ?, ?, ?)""",
+            (symbol, init_margin, timestamp, timestamp),
+        )
+
+    conn.commit()
+    conn.close()
+
+    return (init_margin, main_margin)
+
 
 def normalize_symbol(sym: str) -> str:
     """Normaliza símbolos de Bitget según especificación"""
-    if not sym: return ""
+    if not sym:
+        return ""
     s = sym.upper()
-    s = re.sub(r'^PERP_', '', s)
-    s = re.sub(r'(_|-)?(USDT|USDC|PERP)$', '', s)
-    s = re.sub(r'[_-]+$', '', s)
-    s = re.split(r'[_-]', s)[0]
+    s = re.sub(r"^PERP_", "", s)
+    s = re.sub(r"(_|-)?(USDT|USDC|PERP)$", "", s)
+    s = re.sub(r"[_-]+$", "", s)
+    s = re.split(r"[_-]", s)[0]
     return s
 
-def _bitget_sign(timestamp: str, method: str, request_path: str, 
-                query_string: str = "", body: str = "") -> str:
+
+def _bitget_sign(
+    timestamp: str,
+    method: str,
+    request_path: str,
+    query_string: str = "",
+    body: str = "",
+) -> str:
     """Genera firma HMAC para Bitget"""
     message = timestamp + method.upper() + request_path
     if query_string:
         message += "?" + query_string
     if body:
         message += body
-    
+
     mac = hmac.new(
-        BITGET_API_SECRET.encode('utf-8'),
-        message.encode('utf-8'),
-        hashlib.sha256
+        BITGET_API_SECRET.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
     )
     return base64.b64encode(mac.digest()).decode()
 
-def _bitget_request(method: str, path: str, params: Dict = None, 
-                   body: Dict = None, version: str = "v2") -> Dict:
+
+def _bitget_request(
+    method: str, path: str, params: Dict = None, body: Dict = None, version: str = "v2"
+) -> Dict:
     """Realiza request autenticado a Bitget API asegurando orden idéntico al firmado."""
     if not all([BITGET_API_KEY, BITGET_API_SECRET, BITGET_API_PASSPHRASE]):
         raise ValueError("Missing Bitget API credentials")
@@ -87,7 +174,7 @@ def _bitget_request(method: str, path: str, params: Dict = None,
         "ACCESS-TIMESTAMP": timestamp,
         "ACCESS-PASSPHRASE": BITGET_API_PASSPHRASE,
         "Content-Type": "application/json",
-        "locale": "en-US"
+        "locale": "en-US",
     }
 
     # construimos URL final con el MISMO query string
@@ -97,12 +184,15 @@ def _bitget_request(method: str, path: str, params: Dict = None,
         if method.upper() == "GET":
             response = requests.get(url, headers=headers, timeout=30)
         else:
-            response = requests.post(url, data=body_str if body_str else None, headers=headers, timeout=30)
+            response = requests.post(
+                url, data=body_str if body_str else None, headers=headers, timeout=30
+            )
         response.raise_for_status()
         return response.json()
     except Exception as e:
         print(f"❌ Bitget API error ({path}): {e}")
         return {}
+
 
 # --- helper robusto para floats de la API ('' -> 0.0, None -> 0.0) ---
 def to_f(val, default=0.0) -> float:
@@ -115,6 +205,7 @@ def to_f(val, default=0.0) -> float:
     except Exception:
         return float(default)
 
+
 def fetch_bitget_all_balances() -> Dict[str, Any]:
     """
     Obtiene balances de Bitget usando all-account-balance endpoint
@@ -122,17 +213,19 @@ def fetch_bitget_all_balances() -> Dict[str, Any]:
     """
     try:
         # 1. Obtener todos los balances de cuenta
-        all_balances_data = _bitget_request("GET", "/api/v2/account/all-account-balance")
-        
+        all_balances_data = _bitget_request(
+            "GET", "/api/v2/account/all-account-balance"
+        )
+
         spot_balance = 0.0
         futures_balance = 0.0
         margin_balance = 0.0
-        
+
         if all_balances_data.get("code") == "00000":
             for account in all_balances_data.get("data", []):
                 account_type = account.get("accountType", "").lower()
                 usdt_balance = float(account.get("usdtBalance", "0") or 0)
-                
+
                 if account_type == "spot":
                     spot_balance += usdt_balance
                 elif account_type == "futures":
@@ -140,37 +233,41 @@ def fetch_bitget_all_balances() -> Dict[str, Any]:
                 elif account_type == "margin":
                     margin_balance += usdt_balance
                 # También puedes incluir "funding", "earn", "bots" si los quieres en spot
-        
+
         # 2. Obtener datos adicionales de futuros para unrealized PnL y margin
         unrealized_pnl = 0.0
         initial_margin = 0.0
-        
-        futures_account = _bitget_request("GET", "/api/v2/mix/account/accounts", {
-            "productType": "USDT-FUTURES"
-        })
-        
+
+        futures_account = _bitget_request(
+            "GET", "/api/v2/mix/account/accounts", {"productType": "USDT-FUTURES"}
+        )
+
         if futures_account.get("code") == "00000":
             for account in futures_account.get("data", []):
                 if account.get("crossedUnrealizedPL"):
                     unrealized_pnl += float(account["crossedUnrealizedPL"])
                 # Calcular initial margin como equity - available
                 if account.get("usdtEquity") and account.get("available"):
-                    initial_margin += float(account["usdtEquity"]) - float(account.get("available", 0))
-        
+                    initial_margin += float(account["usdtEquity"]) - float(
+                        account.get("available", 0)
+                    )
+
         # 3. Calcular equity total
         total_equity = spot_balance + futures_balance + margin_balance
-        
+
         return {
             "exchange": "bitget",
             "equity": total_equity,
-            "balance": spot_balance + futures_balance + margin_balance,  # saldo utilizable total
+            "balance": spot_balance
+            + futures_balance
+            + margin_balance,  # saldo utilizable total
             "unrealized_pnl": unrealized_pnl,
             "initial_margin": initial_margin,
             "spot": spot_balance,
             "margin": margin_balance,  # Ahora sí tenemos margin balance
-            "futures": futures_balance
+            "futures": futures_balance,
         }
-        
+
     except Exception as e:
         print(f"❌ Bitget balances error: {e}")
         return {
@@ -181,9 +278,9 @@ def fetch_bitget_all_balances() -> Dict[str, Any]:
             "initial_margin": 0.0,
             "spot": 0.0,
             "margin": 0.0,
-            "futures": 0.0
+            "futures": 0.0,
         }
-        
+
     except Exception as e:
         print(f"❌ Bitget balances error: {e}")
         return {
@@ -194,8 +291,9 @@ def fetch_bitget_all_balances() -> Dict[str, Any]:
             "initial_margin": 0.0,
             "spot": 0.0,
             "margin": 0.0,
-            "futures": 0.0
+            "futures": 0.0,
         }
+
 
 def fetch_bitget_open_positions() -> List[Dict[str, Any]]:
     """
@@ -205,29 +303,29 @@ def fetch_bitget_open_positions() -> List[Dict[str, Any]]:
     positions: List[Dict[str, Any]] = []
 
     try:
-        data = _bitget_request("GET", "/api/v2/mix/position/all-position", {
-            "productType": "USDT-FUTURES"
-        })
+        data = _bitget_request(
+            "GET", "/api/v2/mix/position/all-position", {"productType": "USDT-FUTURES"}
+        )
         if data.get("code") != "00000":
             return positions
 
         for pos in data.get("data", []) or []:
             try:
                 symbol_raw = pos.get("symbol", "")
-                symbol     = normalize_symbol(symbol_raw)
-                hold_side  = (pos.get("holdSide") or "").lower()
+                symbol = normalize_symbol(symbol_raw)
+                hold_side = (pos.get("holdSide") or "").lower()
 
                 # TAMAÑO BASE: Bitget devuelve strings; pueden venir vacíos
                 size = to_f(pos.get("total", 0)) or to_f(pos.get("available", 0))
                 if size <= 0:
                     # Si total=0 pero hay bloqueado, puedes usar locked si te interesa
                     # size = max(size, to_f(pos.get("locked", 0)))
-                    # if size <= 0: 
+                    # if size <= 0:
                     continue
 
                 # PRECIOS
                 entry_price = to_f(pos.get("openPriceAvg", 0))
-                mark_price  = to_f(pos.get("markPrice", 0))
+                mark_price = to_f(pos.get("markPrice", 0))
 
                 # PnL no realizado (solo precio); si falta mark/entry, queda 0.0
                 if hold_side == "long":
@@ -236,37 +334,46 @@ def fetch_bitget_open_positions() -> List[Dict[str, Any]]:
                     unrealized_pnl = (entry_price - mark_price) * size
 
                 # FEES / FUNDING (pueden venir '' según la doc)
-                fee_total    = -abs(to_f(pos.get("deductedFee", 0)))
-                funding_fee  = to_f(pos.get("totalFee", 0))  # vacío si aún no hubo funding
+                fee_total = -abs(to_f(pos.get("deductedFee", 0)))
+                funding_fee = to_f(
+                    pos.get("totalFee", 0)
+                )  # vacío si aún no hubo funding
                 realized_pnl = fee_total + funding_fee
 
                 # LIQUIDATION (si '' o <=0, lo dejas en 0.0 o None según tu frontend)
-                liq_raw      = pos.get("liquidationPrice", 0)
-                liq_price    = to_f(liq_raw, 0.0)
+                liq_raw = pos.get("liquidationPrice", 0)
+                liq_price = to_f(liq_raw, 0.0)
 
                 # NOTIONAL: usar marginSize*leverage si existen; si no, size*entry o size*mark
-                lev          = max(to_f(pos.get("leverage", 1.0)), 1.0)
-                margin_size  = to_f(pos.get("marginSize", 0))
-                notional     = margin_size * lev
+                lev = max(to_f(pos.get("leverage", 1.0)), 1.0)
+                margin_size = to_f(pos.get("marginSize", 0))
+                notional = margin_size * lev
                 if notional <= 0:
                     # fallback razonable cuando margin info no viene
                     base_px = mark_price or entry_price
                     notional = size * base_px
 
-                positions.append({
-                    "exchange": "bitget",
-                    "symbol": symbol,
-                    "side": hold_side,                        # 'long' | 'short'
-                    "size": size,
-                    "entry_price": entry_price,
-                    "mark_price": mark_price,
-                    "liquidation_price": liq_price if liq_price > 0 else 0.0,
-                    "notional": notional,
-                    "unrealized_pnl": unrealized_pnl,
-                    "fee": fee_total,
-                    "funding_fee": funding_fee,
-                    "realized_pnl": realized_pnl
-                })
+                # MARGIN TRACKING: init_margin (primera vez) vs main_margin (actualizaciones)
+                init_margin, main_margin = _get_init_margin(symbol, margin_size)
+
+                positions.append(
+                    {
+                        "exchange": "bitget",
+                        "symbol": symbol,
+                        "side": hold_side,  # 'long' | 'short'
+                        "size": size,
+                        "entry_price": entry_price,
+                        "mark_price": mark_price,
+                        "liquidation_price": liq_price if liq_price > 0 else 0.0,
+                        "notional": notional,
+                        "unrealized_pnl": unrealized_pnl,
+                        "fee": fee_total,
+                        "funding_fee": funding_fee,
+                        "realized_pnl": realized_pnl,
+                        "init_margin": init_margin,
+                        "main_margin": main_margin,
+                    }
+                )
 
             except Exception as e:
                 # Log específico por símbolo si hay problema (p.ej. AIAUSDT con '' en algún campo)
@@ -278,12 +385,15 @@ def fetch_bitget_open_positions() -> List[Dict[str, Any]]:
 
     return positions
 
-def fetch_bitget_funding_fees(limit: int = 2000,
-                              since: int | None = None,
-                              days: int | None = None,
-                              chunk: int = 100,
-                              max_pages: int = 200,
-                              debug: bool = False) -> list[dict]:
+
+def fetch_bitget_funding_fees(
+    limit: int = 2000,
+    since: int | None = None,
+    days: int | None = None,
+    chunk: int = 100,
+    max_pages: int = 200,
+    debug: bool = False,
+) -> list[dict]:
     """
     User funding via Account Bill:
       GET /api/v2/mix/account/bill  (Rate limit 10 req/s UID)
@@ -296,15 +406,15 @@ def fetch_bitget_funding_fees(limit: int = 2000,
     now_ms = int(time.time() * 1000)
     if since is None:
         days = 30 if days is None else int(days)
-        since = now_ms - days*24*3600*1000
+        since = now_ms - days * 24 * 3600 * 1000
     since = int(since)
 
     id_less = None
     pages = 0
     while pages < max_pages and len(out) < limit:
         params = {
-            "productType": "USDT-FUTURES",   # ¡mayúsculas!
-            "limit": str(min(100, max(1, int(chunk))))
+            "productType": "USDT-FUTURES",  # ¡mayúsculas!
+            "limit": str(min(100, max(1, int(chunk)))),
         }
         if id_less:
             params["idLessThan"] = id_less
@@ -314,7 +424,8 @@ def fetch_bitget_funding_fees(limit: int = 2000,
 
         data = _bitget_request("GET", "/api/v2/mix/account/bill", params=params)
         if data.get("code") != "00000":
-            if debug: print("❌ bill error:", data)
+            if debug:
+                print("❌ bill error:", data)
             break
 
         payload = data.get("data", {}) or {}
@@ -324,8 +435,10 @@ def fetch_bitget_funding_fees(limit: int = 2000,
         if debug:
             cnt = len(bills)
             rng = [int(b.get("cTime", 0) or 0) for b in bills]
-            print(f"PAGE {pages+1}: count={cnt} endId={end_id} "
-                  f"range=({min(rng) if rng else None}..{max(rng) if rng else None})")
+            print(
+                f"PAGE {pages+1}: count={cnt} endId={end_id} "
+                f"range=({min(rng) if rng else None}..{max(rng) if rng else None})"
+            )
 
         for b in bills:
             try:
@@ -334,24 +447,33 @@ def fetch_bitget_funding_fees(limit: int = 2000,
                 ts = int(b.get("cTime", "0") or 0)
                 if ts and ts < since:
                     continue
-                amt = float(b.get("amount", "0") or 0)  # firmado por Bitget, puede ser +/- 
+                amt = float(
+                    b.get("amount", "0") or 0
+                )  # firmado por Bitget, puede ser +/-
                 sym_raw = b.get("symbol") or ""
-                sym = normalize_symbol(sym_raw) if 'normalize_symbol' in globals() else sym_raw
-                out.append({
-                    "exchange": "bitget",
-                    "symbol": sym or "GENERAL",
-                    "symbol_raw": sym_raw,
-                    "income": amt,                     # negativo=pago, positivo=cobro
-                    "asset": b.get("coin", "USDT"),
-                    "timestamp": ts,
-                    "funding_rate": None,
-                    "type": "FUNDING_FEE",
-                    "external_id": str(b.get("billId") or f"bitget|{ts}|{amt:.8f}")
-                })
+                sym = (
+                    normalize_symbol(sym_raw)
+                    if "normalize_symbol" in globals()
+                    else sym_raw
+                )
+                out.append(
+                    {
+                        "exchange": "bitget",
+                        "symbol": sym or "GENERAL",
+                        "symbol_raw": sym_raw,
+                        "income": amt,  # negativo=pago, positivo=cobro
+                        "asset": b.get("coin", "USDT"),
+                        "timestamp": ts,
+                        "funding_rate": None,
+                        "type": "FUNDING_FEE",
+                        "external_id": str(b.get("billId") or f"bitget|{ts}|{amt:.8f}"),
+                    }
+                )
                 if len(out) >= limit:
                     break
             except Exception as e:
-                if debug: print("  · skip bill:", e)
+                if debug:
+                    print("  · skip bill:", e)
 
         if not bills or not end_id:
             break
@@ -363,10 +485,13 @@ def fetch_bitget_funding_fees(limit: int = 2000,
     out.sort(key=lambda x: x["timestamp"] or 0)
     if debug:
         if out:
-            print(f"TOTAL items={len(out)} range=({out[0]['timestamp']}..{out[-1]['timestamp']})")
+            print(
+                f"TOTAL items={len(out)} range=({out[0]['timestamp']}..{out[-1]['timestamp']})"
+            )
         else:
             print("TOTAL items=0")
     return out
+
 
 def save_bitget_closed_positions(
     db_path: str = "portfolio.db",
@@ -374,7 +499,7 @@ def save_bitget_closed_positions(
     debug: bool = False,
     symbol: str | None = None,
     limit: int = 100,
-    max_pages: int = 10
+    max_pages: int = 10,
 ):
     """
     Descarga posiciones CERRADAS de Bitget (USDT-M futures) en la ventana indicada
@@ -400,7 +525,13 @@ def save_bitget_closed_positions(
         from db_manager import save_closed_position
     except Exception as e:
         print(f"❌ No module db_manager: {e}")
-        return {"inserted": 0, "updated": 0, "skipped": 0, "skipped_no_time": 0, "duplicated": 0}
+        return {
+            "inserted": 0,
+            "updated": 0,
+            "skipped": 0,
+            "skipped_no_time": 0,
+            "duplicated": 0,
+        }
 
     # ---------- helpers de timestamps (integrados dentro de la función) -----------
     def _to_int(x):
@@ -441,8 +572,10 @@ def save_bitget_closed_positions(
         # si tienes variables globales BITGET_API_KEY/SECRET/PASSPHRASE en este módulo,
         # puedes validarlas aquí. Si no existen, omitimos la verificación.
         if debug:
-            print("🧩 Bitget: guardando cerradas "
-                  f"(últimos {days} días) → {db_path}  symbol={symbol or '-'}")
+            print(
+                "🧩 Bitget: guardando cerradas "
+                f"(últimos {days} días) → {db_path}  symbol={symbol or '-'}"
+            )
     except Exception:
         pass
 
@@ -455,7 +588,13 @@ def save_bitget_closed_positions(
         db_path = os.path.join(ROOT, db_path)
     if not os.path.exists(db_path):
         print(f"❌ Database not found: {db_path}")
-        return {"inserted": 0, "updated": 0, "skipped": 0, "skipped_no_time": 0, "duplicated": 0}
+        return {
+            "inserted": 0,
+            "updated": 0,
+            "skipped": 0,
+            "skipped_no_time": 0,
+            "duplicated": 0,
+        }
 
     # ---------------------------- llamada API con paginación ----------------------
     inserted = 0
@@ -479,21 +618,25 @@ def save_bitget_closed_positions(
                 "productType": "USDT-FUTURES",
                 "startTime": str(start_ms),
                 "endTime": str(end_ms),
-                "limit": str(max(1, min(int(limit), 100)))
+                "limit": str(max(1, min(int(limit), 100))),
             }
             if symbol:
                 params["symbol"] = symbol.upper()
             if end_id:
                 params["idLessThan"] = end_id
 
-            data = _bitget_request("GET", "/api/v2/mix/position/history-position", params)
+            data = _bitget_request(
+                "GET", "/api/v2/mix/position/history-position", params
+            )
 
             if not isinstance(data, dict):
                 print(f"❌ Bitget respuesta no dict (page={page}): {type(data)}")
                 break
 
             if data.get("code") != "00000":
-                print(f"❌ Bitget API error (page={page}): {data.get('msg')} ({data.get('code')})")
+                print(
+                    f"❌ Bitget API error (page={page}): {data.get('msg')} ({data.get('code')})"
+                )
                 break
 
             d = data.get("data") or {}
@@ -528,15 +671,21 @@ def save_bitget_closed_positions(
                         size = float(pos.get("openTotalPos") or 0)
 
                     # tiempos robustos
-                    open_ms = _pick_ms(pos, ["cTime", "ctime", "createTime", "openTime", "startTime"])
-                    close_ms = _pick_ms(pos, ["uTime", "utime", "updateTime", "closeTime", "endTime"])
+                    open_ms = _pick_ms(
+                        pos, ["cTime", "ctime", "createTime", "openTime", "startTime"]
+                    )
+                    close_ms = _pick_ms(
+                        pos, ["uTime", "utime", "updateTime", "closeTime", "endTime"]
+                    )
                     open_time = _ms_to_sec(open_ms)
                     close_time = _ms_to_sec(close_ms)
 
                     if not open_time or not close_time:
                         skipped_no_time += 1
                         if debug:
-                            print(f"  · skip {symbol_norm}: tiempos inválidos (open={open_ms}, close={close_ms})")
+                            print(
+                                f"  · skip {symbol_norm}: tiempos inválidos (open={open_ms}, close={close_ms})"
+                            )
                         continue
 
                     entry_price = float(pos.get("openAvgPrice") or 0)
@@ -548,30 +697,40 @@ def save_bitget_closed_positions(
                     fee_total = open_fee + close_fee  # normalmente negativas en Bitget
 
                     # ---------- deduplicación básica antes de insertar -----------------
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT id FROM closed_positions
                          WHERE exchange=? AND symbol=? AND close_time=?
                          LIMIT 1
-                    """, ("bitget", symbol_norm, close_time))
+                    """,
+                        ("bitget", symbol_norm, close_time),
+                    )
                     row = cur.fetchone()
                     if row:
                         duplicated += 1
                         if debug:
-                            print(f"  · dupe-clasico {symbol_norm}: close_time={close_time} (id={row[0]})")
+                            print(
+                                f"  · dupe-clasico {symbol_norm}: close_time={close_time} (id={row[0]})"
+                            )
                         continue
 
-                    cur.execute("""
+                    cur.execute(
+                        """
                         SELECT id FROM closed_positions
                          WHERE exchange=? AND symbol=? AND side=? AND close_time>0
                            AND ABS(size - ?) <= 1e-8
                            AND ABS(close_price - ?) <= 1e-10
                          LIMIT 1
-                    """, ("bitget", symbol_norm, side, size, close_price))
+                    """,
+                        ("bitget", symbol_norm, side, size, close_price),
+                    )
                     row2 = cur.fetchone()
                     if row2:
                         duplicated += 1
                         if debug:
-                            print(f"  · dupe-tolerancia {symbol_norm}: size/close_price coinciden (id={row2[0]})")
+                            print(
+                                f"  · dupe-tolerancia {symbol_norm}: size/close_price coinciden (id={row2[0]})"
+                            )
                         continue
                     # -------------------------------------------------------------------
 
@@ -587,15 +746,19 @@ def save_bitget_closed_positions(
                         "realized_pnl": net_profit,
                         "funding_total": total_funding,
                         "fee_total": fee_total,
-                        "notional": entry_price * size if entry_price and size else None,
+                        "notional": (
+                            entry_price * size if entry_price and size else None
+                        ),
                         "leverage": 1.0,
-                        "liquidation_price": None
+                        "liquidation_price": None,
                     }
 
                     save_closed_position(payload)
                     inserted += 1
                     if debug:
-                        print(f"  ✅ saved {symbol_norm} {side} size={size} realized={net_profit:.8f}")
+                        print(
+                            f"  ✅ saved {symbol_norm} {side} size={size} realized={net_profit:.8f}"
+                        )
 
                 except Exception as e:
                     skipped += 1
@@ -615,15 +778,18 @@ def save_bitget_closed_positions(
             pass
 
     if debug:
-        print(f"✅ Bitget guardadas: {inserted} | omitidas: {skipped} | sin_fecha: {skipped_no_time} | duplicadas: {duplicated}")
+        print(
+            f"✅ Bitget guardadas: {inserted} | omitidas: {skipped} | sin_fecha: {skipped_no_time} | duplicadas: {duplicated}"
+        )
 
     return {
         "inserted": inserted,
         "updated": updated,
         "skipped": skipped,
         "skipped_no_time": skipped_no_time,
-        "duplicated": duplicated
+        "duplicated": duplicated,
     }
+
 
 ## funcion vieja que falla por el tiempo que no guarda bien
 # def save_bitget_closed_positions(db_path: str = "portfolio.db", days: int = 30, debug: bool = False) -> None:
@@ -688,7 +854,7 @@ def save_bitget_closed_positions(
 #                 # ❌ Blindaje 1: sin tiempos válidos, NO se guarda
 #                 if not open_time or not close_time:
 #                     skipped_no_time += 1
-#                     if debug: 
+#                     if debug:
 #                         print(f"  · skip {symbol}: tiempos inválidos (open={open_time}, close={close_time})")
 #                     continue
 
@@ -770,30 +936,52 @@ if __name__ == "__main__":
 
     def _iso(ms: int) -> str:
         try:
-            return datetime.fromtimestamp(int(ms)/1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+            return datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc).strftime(
+                "%Y-%m-%d %H:%M:%S %Z"
+            )
         except Exception:
             return str(ms)
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--funding-debug", action="store_true", help="Debug interest-history paginado")
-    ap.add_argument("--days", type=int, default=60, help="Ventana hacia atrás (días) si no se pasa 'since'")
-    ap.add_argument("--since", type=int, default=None, help="Epoch ms de corte inferior")
-    ap.add_argument("--limit", type=int, default=1000, help="Máximo de items totales a traer")
-    ap.add_argument("--chunk", type=int, default=100, help="Items por request (máx 100)")
+    ap.add_argument(
+        "--funding-debug", action="store_true", help="Debug interest-history paginado"
+    )
+    ap.add_argument(
+        "--days",
+        type=int,
+        default=60,
+        help="Ventana hacia atrás (días) si no se pasa 'since'",
+    )
+    ap.add_argument(
+        "--since", type=int, default=None, help="Epoch ms de corte inferior"
+    )
+    ap.add_argument(
+        "--limit", type=int, default=1000, help="Máximo de items totales a traer"
+    )
+    ap.add_argument(
+        "--chunk", type=int, default=100, help="Items por request (máx 100)"
+    )
     ap.add_argument("--max-pages", type=int, default=30, help="Máximo de páginas")
     args = ap.parse_args()
 
     if args.funding_debug:
         print("🔎 Bitget interest-history DEBUG")
-        rows = fetch_bitget_funding_fees(limit=args.limit,
-                                         since=args.since,
-                                         days=args.days,
-                                         chunk=args.chunk,
-                                         max_pages=args.max_pages,
-                                         debug=True)
+        rows = fetch_bitget_funding_fees(
+            limit=args.limit,
+            since=args.since,
+            days=args.days,
+            chunk=args.chunk,
+            max_pages=args.max_pages,
+            debug=True,
+        )
         print(f"\nResumen: items={len(rows)}")
         if rows:
-            print("  earliest:", _iso(rows[0]["timestamp"]), "latest:", _iso(rows[-1]["timestamp"]))
+            print(
+                "  earliest:",
+                _iso(rows[0]["timestamp"]),
+                "latest:",
+                _iso(rows[-1]["timestamp"]),
+            )
             print("  sample:", rows[:3])
     else:
         # Smoke rápido de balances/abiertas/funding corto
@@ -802,40 +990,43 @@ if __name__ == "__main__":
         print("\n== open positions ==")
         print(fetch_bitget_open_positions())
         print("\n== funding (debug corto) ==")
-        print(fetch_bitget_funding_fees(limit=10, days=3, chunk=50, max_pages=3, debug=True))
-
+        print(
+            fetch_bitget_funding_fees(
+                limit=10, days=3, chunk=50, max_pages=3, debug=True
+            )
+        )
 
 
 # def debug_preview_bitget_closed(days: int = 3, symbol: Optional[str] = None) -> None:
 #     """Debug: previsualiza lo que se guardaría para posiciones cerradas"""
 #     print(f"🔍 Debug Bitget Closed Positions (últimos {days} días)")
-    
+
 #     end_time = int(time.time() * 1000)
 #     start_time = end_time - (days * 24 * 60 * 60 * 1000)
-    
+
 #     data = _bitget_request("GET", "/api/v2/mix/position/history-position", {
 #         "productType": "USDT-FUTURES",
 #         "startTime": start_time,
 #         "endTime": end_time,
 #         "limit": 20
 #     })
-    
+
 #     if data.get("code") != "00000":
 #         print("❌ No se pudieron obtener datos")
 #         return
-    
+
 #     for pos in data.get("data", {}).get("list", []):
 #         sym = normalize_symbol(pos.get("symbol", ""))
 #         if symbol and sym != symbol:
 #             continue
-            
+
 #         net_profit = float(pos.get("netProfit", "0"))
 #         total_funding = float(pos.get("totalFunding", "0"))
 #         open_fee = float(pos.get("openFee", "0"))
 #         close_fee = float(pos.get("closeFee", "0"))
 #         fee_total = -abs(open_fee + close_fee)
 #         price_pnl = net_profit - total_funding - fee_total
-        
+
 #         print(f"\n📊 {sym} {pos.get('holdSide')}:")
 #         print(f"   Size: {pos.get('openTotalPos')}")
 #         print(f"   Entry: {pos.get('openAvgPrice')} | Close: {pos.get('closeAvgPrice')}")
@@ -848,16 +1039,16 @@ if __name__ == "__main__":
 # if __name__ == "__main__":
 #     # Smoke tests
 #     import sys
-    
+
 #     if "--dry-run" in sys.argv:
 #         print("🧪 Bitget Adapter Smoke Tests")
-        
+
 #         # Test normalización
 #         test_symbols = ["BTCUSDT", "BTC-USDT", "BTC_USDT", "PERP_BTCUSDT", "ETHUSDC-PERP"]
 #         print("\n🔧 Normalization tests:")
 #         for sym in test_symbols:
 #             print(f"   {sym} -> {normalize_symbol(sym)}")
-        
+
 #         # Test balances
 #         print("\n💰 Balance test:")
 #         balances = fetch_bitget_all_balances()
@@ -866,49 +1057,58 @@ if __name__ == "__main__":
 #             print(f"   Spot: {balances['spot']:.2f}")
 #             print(f"   Futures: {balances['futures']:.2f}")
 #             print(f"   Unrealized PnL: {balances['unrealized_pnl']:.2f}")
-        
+
 #         # Test open positions
 #         print("\n📈 Open positions test:")
 #         positions = fetch_bitget_open_positions()
 #         for pos in positions[:3]:  # Mostrar primeras 3
 #             print(f"   {pos['symbol']} {pos['side']} size={pos['size']} unrealized={pos['unrealized_pnl']:.2f}")
-        
+
 #         # Test funding
 #         print("\n💸 Funding test:")
 #         funding = fetch_bitget_funding_fees(limit=5)
 #         for f in funding:
 #             print(f"   {f['asset']}: {f['income']:.6f} rate={f['funding_rate']:.6f}")
-        
+
 #         # Test closed preview
 #         print("\n📊 Closed positions preview:")
 #         debug_preview_bitget_closed(days=1)
-        
+
 #         print("\n✅ Smoke tests completed")
 
 # ===================== RAW DEBUG: Historical Position =====================
 
 # ===================== RAW DEBUG: Historical Position =====================
 
-def debug_bitget_closed_raw(days: int = 30, symbol: str | None = None,
-                            limit: int = 100, max_pages: int = 3,
-                            print_items: int = 3, verbose: bool = True):
+
+def debug_bitget_closed_raw(
+    days: int = 30,
+    symbol: str | None = None,
+    limit: int = 100,
+    max_pages: int = 3,
+    print_items: int = 3,
+    verbose: bool = True,
+):
     """
     Descarga la respuesta RAW de /api/v2/mix/position/history-position
     e imprime estructura, tamaños y un sample de items (sin transformar).
     """
     import time, json
+
     start_ms = int(time.time() * 1000) - int(days * 24 * 60 * 60 * 1000)
     end_ms = int(time.time() * 1000)
     end_id = None
     total = 0
 
-    print(f"🔍 Bitget RAW debug (últimos {days} días) limit={limit} páginas={max_pages} symbol={symbol or '-'}")
+    print(
+        f"🔍 Bitget RAW debug (últimos {days} días) limit={limit} páginas={max_pages} symbol={symbol or '-'}"
+    )
     for page in range(1, max_pages + 1):
         params = {
             "productType": "USDT-FUTURES",
             "startTime": str(start_ms),
             "endTime": str(end_ms),
-            "limit": str(limit)
+            "limit": str(limit),
         }
         if symbol:
             params["symbol"] = symbol.upper()
@@ -936,6 +1136,7 @@ def debug_bitget_closed_raw(days: int = 30, symbol: str | None = None,
 
         # imprime algunos items sin truncar claves (limita caracteres por item)
         import itertools
+
         for i, item in enumerate(itertools.islice(lst, 0, print_items), 1):
             try:
                 print(f"  #{i}: {json.dumps(item, indent=2)[:1200]}")
@@ -957,28 +1158,31 @@ def debug_bitget_closed_raw(days: int = 30, symbol: str | None = None,
     print("----------------------------------------------------------------------")
     return True
 
+
 # ===================== AUTO-RUN PARA SPYDER =====================
 
 # Ajustes rápidos para cuando pulsas Run
-AUTO_DEBUG_RAW = True        # <- déjalo True para ver RAW al pulsar Run
-AUTO_DAYS = 30               # ventana hacia atrás en días
-AUTO_LIMIT = 50              # 1..100
-AUTO_PAGES = 2               # páginas a seguir con idLessThan
-AUTO_PRINT = 3               # cuantos items imprimir por página
-AUTO_SYMBOL = None           # por ejemplo "BTCUSDT" o None para todo
+AUTO_DEBUG_RAW = True  # <- déjalo True para ver RAW al pulsar Run
+AUTO_DAYS = 30  # ventana hacia atrás en días
+AUTO_LIMIT = 50  # 1..100
+AUTO_PAGES = 2  # páginas a seguir con idLessThan
+AUTO_PRINT = 3  # cuantos items imprimir por página
+AUTO_SYMBOL = None  # por ejemplo "BTCUSDT" o None para todo
 
 if __name__ == "__main__":
     import os
+
     # Evita ejecutar otros modos; muestra RAW directamente al pulsar Run
     if AUTO_DEBUG_RAW or os.getenv("BITGET_DEBUG_RAW") == "1":
-        debug_bitget_closed_raw(days=AUTO_DAYS,
-                                symbol=AUTO_SYMBOL,
-                                limit=AUTO_LIMIT,
-                                max_pages=AUTO_PAGES,
-                                print_items=AUTO_PRINT)
+        debug_bitget_closed_raw(
+            days=AUTO_DAYS,
+            symbol=AUTO_SYMBOL,
+            limit=AUTO_LIMIT,
+            max_pages=AUTO_PAGES,
+            print_items=AUTO_PRINT,
+        )
     else:
         print("ℹ️ Ajusta AUTO_DEBUG_RAW=True para mostrar RAW al pulsar Run.")
-
 
 
 # # funcion para ejecutar el closed positons y luego el save closed positions

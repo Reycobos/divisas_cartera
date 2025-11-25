@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Tuple, Optional
 # === Path utils ===
 # --- rutas y imports de utilidades del proyecto ---
 import os, sys, sqlite3, time as pytime
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.append(BASE_DIR)
@@ -48,16 +49,18 @@ DB_PATH_DEFAULT = os.path.join(BASE_DIR, "portfolio.db")
 
 # ---------- Constantes / helpers ----------
 STABLES = {"USDT", "USDC"}
-IGNORE_BASES = {"BTC", "ETH"}    # ignora pares con BTC/ETH
+IGNORE_BASES = {"BTC", "ETH"}  # ignora pares con BTC/ETH
 
-DUST_RATIO = 0.001               # 0.1% del pico de inventario
+DUST_RATIO = 0.001  # 0.1% del pico de inventario
 MIN_DUST_ABS = 0.01
+
 
 def _f(x: Any, d: float = 0.0) -> float:
     try:
         return float(x)
     except Exception:
         return d
+
 
 def _split_pair(s: str) -> Tuple[str, str]:
     """'AAA_USDT' | 'AAA/USDT' | 'AAAUSDT' -> (base, quote) en MAYÚSCULAS."""
@@ -68,40 +71,53 @@ def _split_pair(s: str) -> Tuple[str, str]:
     # Sin separador: intentar heurística USDT/USDC/USD
     for q in ("USDT", "USDC", "USD"):
         if t.endswith(q):
-            return t[:-len(q)], q
+            return t[: -len(q)], q
     return t, ""
+
 
 def _pair_upper(pair: str) -> str:
     return pair.replace("/", "_").upper()
 
+
 def _fmt_ms(ms) -> str:
     from datetime import datetime, timezone
+
     try:
         ms = int(ms or 0)
         if ms and ms < 1_000_000_000_000:
             ms *= 1000
-        return datetime.fromtimestamp(ms/1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     except Exception:
         return str(ms)
+
 
 def _should_ignore_pair(pair: str) -> bool:
     b, q = _split_pair(pair)
     return (b in IGNORE_BASES) or (q in IGNORE_BASES)
 
+
 def _is_stable_swap(pair: str) -> bool:
     b, q = _split_pair(pair)
     return b in STABLES and q in STABLES
+
+
 def _ensure_closed_positions_unique_index(conn: sqlite3.Connection):
     """
     Crea un índice UNIQUE estable para evitar duplicados “lógicos”
     sin depender de redondeos. Usa open_time+close_time como llave temporal.
     """
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         CREATE UNIQUE INDEX IF NOT EXISTS ux_closed_positions_no_dupes
         ON closed_positions(exchange, symbol, side, open_time, close_time);
-    """)
+    """
+    )
     conn.commit()
+
+
 def _exists_closed_position(conn: sqlite3.Connection, row: dict) -> bool:
     """
     Evita duplicados comprobando una coincidencia “lógica”:
@@ -137,16 +153,18 @@ def _exists_closed_position(conn: sqlite3.Connection, row: dict) -> bool:
     cur = conn.cursor()
     cur.execute(q, vals)
     return cur.fetchone() is not None
+
+
 # ---------- Estructuras ----------
 @dataclass
 class Fill:
-    ts: int            # epoch seconds
-    pair: str          # e.g., "AAA_USDT"
-    side: str          # buy|sell
-    amount: float      # base amount
-    price: float       # quote per base
-    fee: float         # fee amount in fee_ccy units (positivo)
-    fee_ccy: str       # fee currency
+    ts: int  # epoch seconds
+    pair: str  # e.g., "AAA_USDT"
+    side: str  # buy|sell
+    amount: float  # base amount
+    price: float  # quote per base
+    fee: float  # fee amount in fee_ccy units (positivo)
+    fee_ccy: str  # fee currency
 
     @property
     def base_quote(self) -> Tuple[str, str]:
@@ -161,8 +179,11 @@ class Fill:
             return self.fee * self.price
         return self.fee  # fallback: tratar como quote
 
+
 # ---------- Fetch: fills con ventanas + paginación ----------
-def fetch_spot_trades(days_back: int = 30, limit: int = 100) -> List[Fill]:
+def fetch_spot_trades(
+    days_back: int = 30, limit: int = 100, debug: bool = False
+) -> List[Fill]:
     """
     Ventanas de hasta 90 días (API limita <=90d).
     Paginación hacia atrás con idLessThan (tradeId).
@@ -182,7 +203,8 @@ def fetch_spot_trades(days_back: int = 30, limit: int = 100) -> List[Fill]:
     end = now_ms
     while end > from_ms:
         start = max(from_ms, end - win_ms)
-        print(f"📥 Ventana {_fmt_ms(start)} - {_fmt_ms(end)}")
+        if debug:
+            print(f"📥 Ventana {_fmt_ms(start)} - {_fmt_ms(end)}")
 
         # paginación con idLessThan (página conceptual)
         id_less = None
@@ -196,11 +218,13 @@ def fetch_spot_trades(days_back: int = 30, limit: int = 100) -> List[Fill]:
             if id_less:
                 params["idLessThan"] = id_less
 
-            print(f"   ⏩ Página {page_idx} (idLessThan={id_less})")
+            if debug:
+                print(f"   ⏩ Página {page_idx} (idLessThan={id_less})")
             data = _request("GET", "/api/v2/spot/trade/fills", params=params)
             # data: {"code":"00000","data":[...]}
             rows = (data or {}).get("data") or []
-            print(f"   ✅ Página {page_idx}: {len(rows)} trades")
+            if debug:
+                print(f"   ✅ Página {page_idx}: {len(rows)} trades")
 
             if not rows:
                 break
@@ -219,14 +243,24 @@ def fetch_spot_trades(days_back: int = 30, limit: int = 100) -> List[Fill]:
                     fee_raw = _f(fee_d.get("totalFee") or 0.0)
                     fee = abs(fee_raw)  # trabajamos fee como magnitud positiva
 
-                    all_fills.append(Fill(ts=ts, pair=pair, side=side, amount=sz,
-                                          price=px, fee=fee, fee_ccy=fee_coin))
+                    all_fills.append(
+                        Fill(
+                            ts=ts,
+                            pair=pair,
+                            side=side,
+                            amount=sz,
+                            price=px,
+                            fee=fee,
+                            fee_ccy=fee_coin,
+                        )
+                    )
                 except Exception as e:
-                    print("      · skip fill por error:", e)
+                    if debug:
+                        print("      · skip fill por error:", e)
                     continue
 
             # preparar siguiente página
-            last_trade_id = (rows[-1].get("tradeId") if rows else None)
+            last_trade_id = rows[-1].get("tradeId") if rows else None
             if not last_trade_id or len(rows) < int(params["limit"]):
                 break
             id_less = str(last_trade_id)
@@ -238,8 +272,10 @@ def fetch_spot_trades(days_back: int = 30, limit: int = 100) -> List[Fill]:
 
     # Orden ascendente para FIFO estable
     all_fills.sort(key=lambda x: x.ts)
-    print(f"📊 Total trades descargados: {len(all_fills)}")
+    if debug:
+        print(f"📊 Total trades descargados: {len(all_fills)}")
     return all_fills
+
 
 # ---------- FIFO engine ----------
 @dataclass
@@ -269,9 +305,9 @@ class RoundAgg:
         sz = self.qty
         entry_price = self.cost_quote / max(sz, 1e-12)
         close_price = self.proceeds_quote / max(sz, 1e-12)
-        pnl_price = (self.proceeds_quote - self.cost_quote)
-        fee_total = -abs(self.fees_quote)         # negativo en DB
-        realized = pnl_price + fee_total          # funding=0 en spot
+        pnl_price = self.proceeds_quote - self.cost_quote
+        fee_total = -abs(self.fees_quote)  # negativo en DB
+        realized = pnl_price + fee_total  # funding=0 en spot
         return {
             "size": sz,
             "entry_price": entry_price,
@@ -284,6 +320,7 @@ class RoundAgg:
             "close_time": int(self.close_time or 0),
             "notional": self.cost_quote,
         }
+
 
 # ---------- Balances spot (para heurística de retiro) ----------
 def fetch_bitget_spot_balances() -> Dict[str, float]:
@@ -304,6 +341,7 @@ def fetch_bitget_spot_balances() -> Dict[str, float]:
         print(f"⚠️ No se pudieron leer balances spot Bitget: {e}")
     return out
 
+
 # ---------- DB insert (calcula pnl_percent / apr e idempotencia con colisión) ----------
 INSERT_SQL = (
     "INSERT OR IGNORE INTO closed_positions ("
@@ -313,7 +351,8 @@ INSERT_SQL = (
     ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 
-def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any]):
+
+def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any], verbose: bool = False):
     # Derivados (idéntico a tu flujo actual, sin updates posteriores)
     size = float(row.get("size") or 0.0)
     entry = float(row.get("entry_price") or 0.0)
@@ -341,36 +380,53 @@ def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any]):
         close_s,
         pnl,
         realized,
-        0.0,                 # funding_total (spot)
+        0.0,  # funding_total (spot)
         fee_total,
         pnl_percent,
         apr,
-        None,                # initial_margin
+        None,  # initial_margin
         notional,
-        0.0,                 # leverage
-        None,                # liquidation_price
+        0.0,  # leverage
+        None,  # liquidation_price
         int(bool(row.get("ignore_trade", False))),
     )
 
     # 1) Chequeo previo (rápido) anti-duplicados
-    if _exists_closed_position(conn, {
-        "exchange": vals[0], "symbol": vals[1], "side": vals[2],
-        "size": vals[3], "entry_price": vals[4], "close_price": vals[5],
-        "open_time": vals[6], "close_time": vals[7]
-    }):
-        print(f"⚠️ Duplicado detectado (pre-insert): {vals[1]} {vals[2]} {vals[7]} → SKIP")
+    if _exists_closed_position(
+        conn,
+        {
+            "exchange": vals[0],
+            "symbol": vals[1],
+            "side": vals[2],
+            "size": vals[3],
+            "entry_price": vals[4],
+            "close_price": vals[5],
+            "open_time": vals[6],
+            "close_time": vals[7],
+        },
+    ):
+        if verbose:
+            print(
+                f"⚠️ Duplicado detectado (pre-insert): {vals[1]} {vals[2]} {vals[7]} → SKIP"
+            )
         return
 
     cur = conn.cursor()
     cur.execute(INSERT_SQL, vals)
     if cur.rowcount == 0:
         # 2) INSERT OR IGNORE no insertó → ya existe por UNIQUE INDEX
-        print(f"⚠️ Duplicado ignorado por UNIQUE: {vals[1]} {vals[2]} {vals[7]} → SKIP")
+        if verbose:
+            print(
+                f"⚠️ Duplicado ignorado por UNIQUE: {vals[1]} {vals[2]} {vals[7]} → SKIP"
+            )
         return
     # NO hay updates: si entró, se queda así para siempre.
 
+
 # ---------- Core ----------
-def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 30, debug: bool = True) -> Tuple[int, int]:
+def save_bitget_spot_positions(
+    db_path: str = "portfolio.db", days_back: int = 30, debug: bool = False
+) -> Tuple[int, int]:
     """
     Descarga fills spot, calcula FIFO y guarda rondas en closed_positions.
 
@@ -387,11 +443,23 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
     """
     # Asegura DB con columna ignore_trade.  :contentReference[oaicite:10]{index=10}
     from db_manager import init_db, migrate_spot_support
-    init_db(); migrate_spot_support()
 
-    fills = fetch_spot_trades(days_back=days_back, limit=100)
-    if debug:
-        print(f"🔎 Bitget spot fills: {len(fills)}")
+    init_db()
+    migrate_spot_support()
+
+    def _dbg(msg: str):
+        if debug:
+            print(msg)
+
+    fills = fetch_spot_trades(days_back=days_back, limit=100, debug=debug)
+    total_trades_found = len(fills)
+    _dbg(f"🔎 Bitget spot fills: {total_trades_found}")
+
+    if total_trades_found == 0:
+        print(f"\n{'='*60}")
+        print("ℹ️  No se encontraron trades nuevos en BITGET Spot")
+        print(f"{'='*60}")
+        return 0, 0
 
     # Balances spot para heurística de retiro
     spot_bal = fetch_bitget_spot_balances()
@@ -402,6 +470,7 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
         if _should_ignore_pair(f.pair):
             continue
         by_pair[_pair_upper(f.pair)].append(f)
+    symbols_with_trades = len(by_pair)
 
     saved = 0
     ignored = 0
@@ -436,7 +505,7 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                     "notional": max(received_quote, net_base_out),
                     "ignore_trade": 0,
                 }
-                _insert_row(conn, row)
+                _insert_row(conn, row, verbose=debug)
                 saved += 1
             continue
 
@@ -463,7 +532,7 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                 "notional": abs(f.amount) * f.price,
                 "ignore_trade": 1,
             }
-            _insert_row(conn, row)
+            _insert_row(conn, row, verbose=debug)
             ignored += 1
             idx += 1
 
@@ -479,8 +548,10 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
         def _flush_round():
             nonlocal saved, round_agg, round_started, total_qty_in_round, peak_inventory_base
             if not round_started or not round_agg.is_valid():
-                round_agg = RoundAgg(); round_started = False
-                total_qty_in_round = 0.0; peak_inventory_base = 0.0
+                round_agg = RoundAgg()
+                round_started = False
+                total_qty_in_round = 0.0
+                peak_inventory_base = 0.0
                 return
             data = round_agg.finalize()
             data["size"] = peak_inventory_base  # size = pico de inventario
@@ -491,10 +562,12 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                 "ignore_trade": 0,
                 **data,
             }
-            _insert_row(conn, row)
+            _insert_row(conn, row, verbose=debug)
             saved += 1
-            round_agg = RoundAgg(); round_started = False
-            total_qty_in_round = 0.0; peak_inventory_base = 0.0
+            round_agg = RoundAgg()
+            round_started = False
+            total_qty_in_round = 0.0
+            peak_inventory_base = 0.0
 
         for f in trades[idx:]:
             if f.side == "buy":
@@ -502,8 +575,12 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                 fee_q = f.fee_in_quote()
 
                 # cantidad REAL recibida en base si fee en BASE
-                received_base = max(f.amount - (f.fee if f.fee_ccy == base else 0.0), 0.0)
-                fee_per_unit_q = (fee_q / max(received_base, 1e-12)) if received_base > 0 else 0.0
+                received_base = max(
+                    f.amount - (f.fee if f.fee_ccy == base else 0.0), 0.0
+                )
+                fee_per_unit_q = (
+                    (fee_q / max(received_base, 1e-12)) if received_base > 0 else 0.0
+                )
 
                 lot_q.append([received_base, f.price, fee_per_unit_q, f.ts])
 
@@ -525,9 +602,10 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                     take = min(q, sell_left)
 
                     round_agg.merge_sell(
-                        take, f.price,
+                        take,
+                        f.price,
                         fee_q * (take / sell_qty) if sell_qty > 0 else 0.0,
-                        f.ts
+                        f.ts,
                     )
 
                     q -= take
@@ -540,7 +618,9 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                 inventory_base = sum(q for q, *_ in lot_q)
 
                 dust = max(MIN_DUST_ABS, DUST_RATIO * peak_inventory_base)
-                if (inventory_base <= dust and total_qty_in_round >= 500) or (not lot_q and sell_left <= 1e-12):
+                if (inventory_base <= dust and total_qty_in_round >= 500) or (
+                    not lot_q and sell_left <= 1e-12
+                ):
                     _flush_round()
 
         # Final del símbolo
@@ -552,7 +632,9 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                 _flush_round()
             else:
                 bal_base = spot_bal.get(base, 0.0)
-                if (not sells_occurred) or (rem_base > dust and bal_base < rem_base * 0.5):
+                if (not sells_occurred) or (
+                    rem_base > dust and bal_base < rem_base * 0.5
+                ):
                     notional = sum(q * p for q, p, *_ in lot_q)
                     ts_open = min(ts for *_a, ts in lot_q)
                     row = {
@@ -570,23 +652,41 @@ def save_bitget_spot_positions(db_path: str = "portfolio.db", days_back: int = 3
                         "notional": notional,
                         "ignore_trade": 1,
                     }
-                    _insert_row(conn, row)
+                    _insert_row(conn, row, verbose=debug)
                     ignored += 1
                 # si hubo ventas y rem_base > polvo ⇒ queda abierta
 
-    conn.commit(); conn.close()
-    if debug:
-        print(f"✅ Spot FIFO Bitget: guardadas={saved}, ignoradas={ignored}")
+    conn.commit()
+    conn.close()
+
+    print(f"\n{'='*60}")
+    print("✅ BITGET Spot FIFO COMPLETADO:")
+    print(f"   📈 Símbolos con trades: {symbols_with_trades}")
+    print(f"   🔢 Trades procesados: {total_trades_found}")
+    print(f"   💾 Posiciones guardadas: {saved}")
+    print(f"   ⚠️  Posiciones ignoradas: {ignored}")
+    print(f"{'='*60}")
+
     return saved, ignored
+
 
 # ---------- CLI ----------
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Bitget Spot FIFO → closed_positions")
-    parser.add_argument("--db", type=str, default=DB_PATH_DEFAULT, help="Ruta a portfolio.db")
-    parser.add_argument("--days_back", type=int, default=30, help="Histórico hacia atrás (días, ≤90 por ventana)")
+    parser.add_argument(
+        "--db", type=str, default=DB_PATH_DEFAULT, help="Ruta a portfolio.db"
+    )
+    parser.add_argument(
+        "--days_back",
+        type=int,
+        default=30,
+        help="Histórico hacia atrás (días, ≤90 por ventana)",
+    )
     parser.add_argument("--debug", action="store_true", help="Logs verbosos")
     args = parser.parse_args()
 
-    save_bitget_spot_positions(db_path=args.db, days_back=args.days_back, debug=(args.debug or True))
-
+    save_bitget_spot_positions(
+        db_path=args.db, days_back=args.days_back, debug=args.debug
+    )

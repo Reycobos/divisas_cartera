@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Tuple, Optional
 
 # === Path utils ===
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-UTILS_DIR = os.path.join(BASE_DIR, 'utils')
+UTILS_DIR = os.path.join(BASE_DIR, "utils")
 if UTILS_DIR not in sys.path:
     sys.path.append(UTILS_DIR)
 
@@ -59,15 +59,22 @@ from utils.time import to_s  # utils/time.py (convierte ms↔s robustamente)
 
 # === Gate.auth helpers ===
 try:
-    from adapters.gate import _request, fetch_gate_spot_balances  # firma v4 cuando se importa como paquete
+    from adapters.gate import (
+        _request,
+        fetch_gate_spot_balances,
+    )  # firma v4 cuando se importa como paquete
 except ImportError:
-    from gate import _request, fetch_gate_spot_balances  # compat al ejecutar como script desde /adapters
+    from gate import (
+        _request,
+        fetch_gate_spot_balances,
+    )  # compat al ejecutar como script desde /adapters
 
-DB_PATH_DEFAULT = os.path.join(BASE_DIR, 'portfolio.db')
+DB_PATH_DEFAULT = os.path.join(BASE_DIR, "portfolio.db")
 
 # ---------- Helpers ----------
 STABLES = {"USDT", "USDC"}
 IGNORE_BASES = {"BTC", "ETH"}  # ignora cualquier trade que las involucre
+
 
 def get_existing_trade_hashes(db_path: str) -> set:
     """
@@ -76,15 +83,17 @@ def get_existing_trade_hashes(db_path: str) -> set:
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    
+
     try:
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT exchange, symbol, side, close_time, size 
             FROM closed_positions 
             WHERE exchange = 'gate'
-        """)
+        """
+        )
         existing_trades = cursor.fetchall()
-        
+
         # Crear hashes únicos basados en los campos clave
         hashes = set()
         for trade in existing_trades:
@@ -92,7 +101,7 @@ def get_existing_trade_hashes(db_path: str) -> set:
             # Crear un hash único para este trade
             trade_hash = f"{exchange}_{symbol}_{side}_{close_time}_{round(size, 8)}"
             hashes.add(trade_hash)
-            
+
         return hashes
     finally:
         conn.close()
@@ -106,24 +115,24 @@ def _num(x: Any, d: float = 0.0) -> float:
 
 
 def _split_pair(cp: str) -> Tuple[str, str]:
-    """ 'AAA_USDT' | 'AAA/USDT' -> (base, quote) en MAYÚSCULAS. """
-    s = (cp or '').replace('/', '_').upper()
-    parts = s.split('_')
+    """'AAA_USDT' | 'AAA/USDT' -> (base, quote) en MAYÚSCULAS."""
+    s = (cp or "").replace("/", "_").upper()
+    parts = s.split("_")
     if len(parts) >= 2:
         return parts[0], parts[1]
     # fallback: todo como base
-    return s, ''
+    return s, ""
 
 
 @dataclass
 class Fill:
-    ts: int           # epoch seconds
-    pair: str         # e.g., "AAA_USDT"
-    side: str         # buy|sell
-    amount: float     # base amount
-    price: float      # quote per base
-    fee: float        # fee amount in fee_ccy units
-    fee_ccy: str      # currency of fee
+    ts: int  # epoch seconds
+    pair: str  # e.g., "AAA_USDT"
+    side: str  # buy|sell
+    amount: float  # base amount
+    price: float  # quote per base
+    fee: float  # fee amount in fee_ccy units
+    fee_ccy: str  # currency of fee
 
     @property
     def base_quote(self) -> Tuple[str, str]:
@@ -138,106 +147,128 @@ class Fill:
             return self.fee * self.price
         # Desconocida: asume quote (mejor que 0)
         return self.fee
+
+
 def _fmt_ms(ms) -> str:
     """Convierte ms/seg a 'YYYY-MM-DD HH:MM:SS UTC'."""
     from datetime import datetime, timezone
+
     try:
         ms = int(ms or 0)
         if ms and ms < 1_000_000_000_000:  # venía en segundos
             ms *= 1000
-        return datetime.fromtimestamp(ms/1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S UTC"
+        )
     except Exception:
         return str(ms)
 
+
 # ---------- Fetch layer ----------
 
-def fetch_spot_trades(days_back: int = 40, limit: int = 1000, existing_hashes: set = None, debug: bool = False) -> List[Fill]:
+
+def fetch_spot_trades(
+    days_back: int = 40,
+    limit: int = 1000,
+    existing_hashes: set = None,
+    debug: bool = False,
+) -> List[Fill]:
     """Descarga fills usando ventanas de 30 días + paginación, filtrando existentes."""
     import time as _t
-    
+
     if existing_hashes is None:
         existing_hashes = set()
-    
+
     all_fills = []
     to_ts = int(_t.time())
     from_ts = to_ts - max(1, int(days_back)) * 24 * 3600
-    
+
     # Dividir en ventanas de máximo 30 días
     window_days = 30
     current_to = to_ts
-    
+
     while current_to > from_ts:
         current_from = max(from_ts, current_to - (window_days * 24 * 3600))
-        
+
         page = 1
         max_pages = 10  # Límite de páginas por ventana
-        
+
         while page <= max_pages:
             params = {
-                'limit': max(1, min(int(limit), 1000)),
-                'page': page,
-                'from': current_from,
-                'to': current_to,
+                "limit": max(1, min(int(limit), 1000)),
+                "page": page,
+                "from": current_from,
+                "to": current_to,
             }
-            
+
             try:
-                print(f"📥 Ventana {_fmt_ms(current_from * 1000)} - {_fmt_ms(current_to * 1000)}, página {page}")
-                
-                rows = _request('GET', '/spot/my_trades', params=params) or []
-                
+                if debug:
+                    print(
+                        f"📥 Ventana {_fmt_ms(current_from * 1000)} - {_fmt_ms(current_to * 1000)}, página {page}"
+                    )
+
+                rows = _request("GET", "/spot/my_trades", params=params) or []
+
                 if not rows:
                     break
-                    
+
                 new_trades_in_page = 0
                 for r in rows:
-                    ts_raw = r.get('create_time') or r.get('create_time_ms') or 0
+                    ts_raw = r.get("create_time") or r.get("create_time_ms") or 0
                     ts = to_s(ts_raw)
-                    pair = (r.get('currency_pair') or '').replace('/', '_').upper()
-                    side = (r.get('side') or '').lower()
-                    amt = _num(r.get('amount'))
-                    px  = _num(r.get('price'))
-                    fee = _num(r.get('fee'))
-                    fee_ccy = (r.get('fee_currency') or '').upper()
-                    
+                    pair = (r.get("currency_pair") or "").replace("/", "_").upper()
+                    side = (r.get("side") or "").lower()
+                    amt = _num(r.get("amount"))
+                    px = _num(r.get("price"))
+                    fee = _num(r.get("fee"))
+                    fee_ccy = (r.get("fee_currency") or "").upper()
+
                     # Crear hash para este trade
                     trade_hash = f"gate_{pair}_{side}_{ts}_{round(amt, 8)}"
-                    
+
                     # Solo agregar si no existe
                     if trade_hash not in existing_hashes:
                         all_fills.append(Fill(ts, pair, side, amt, px, fee, fee_ccy))
                         new_trades_in_page += 1
                     else:
                         if debug:
-                            print(f"⏭️  Trade existente omitido: {pair} {side} {_fmt_ms(ts * 1000)}")
-                
-                print(f"✅ Página {page}: {len(rows)} trades descargados, {new_trades_in_page} nuevos")
-                
+                            print(
+                                f"⏭️  Trade existente omitido: {pair} {side} {_fmt_ms(ts * 1000)}"
+                            )
+
+                if debug:
+                    print(
+                        f"✅ Página {page}: {len(rows)} trades descargados, {new_trades_in_page} nuevos"
+                    )
+
                 # Si obtenemos menos trades que el límite, es la última página
                 if len(rows) < limit:
                     break
-                    
+
                 page += 1
                 _t.sleep(0.1)
-                
+
             except Exception as e:
                 print(f"❌ Error en página {page}: {e}")
                 break
-        
+
         # Mover la ventana hacia atrás
         current_to = current_from - 1
         _t.sleep(0.2)
 
     # Orden por tiempo ascendente para FIFO estable
     all_fills.sort(key=lambda f: f.ts)
-    print(f"📊 Total trades nuevos a procesar: {len(all_fills)}")
+    if debug:
+        print(f"📊 Total trades nuevos a procesar: {len(all_fills)}")
     return all_fills
+
 
 # ---------- FIFO engine ----------
 @dataclass
 class RoundAgg:
     qty: float = 0.0
-    cost_quote: float = 0.0     # suma (buy_qty * buy_price)
-    proceeds_quote: float = 0.0 # suma (sell_qty * sell_price)
+    cost_quote: float = 0.0  # suma (buy_qty * buy_price)
+    proceeds_quote: float = 0.0  # suma (sell_qty * sell_price)
     fees_quote: float = 0.0
     open_time: Optional[int] = None
     close_time: Optional[int] = None
@@ -260,20 +291,20 @@ class RoundAgg:
         size = self.qty
         entry_price = self.cost_quote / max(size, 1e-12)
         close_price = self.proceeds_quote / max(size, 1e-12)
-        pnl_price = (self.proceeds_quote - self.cost_quote)
+        pnl_price = self.proceeds_quote - self.cost_quote
         fee_total = -abs(self.fees_quote)  # negativo en DB
-        realized = pnl_price + fee_total   # no hay funding en spot
+        realized = pnl_price + fee_total  # no hay funding en spot
         return {
-            'size': size,
-            'entry_price': entry_price,
-            'close_price': close_price,
-            'pnl': pnl_price,
-            'realized_pnl': realized,
-            'fee_total': fee_total,
-            'funding_total': 0.0,
-            'open_time': int(self.open_time or 0),
-            'close_time': int(self.close_time or 0),
-            'notional': self.cost_quote,
+            "size": size,
+            "entry_price": entry_price,
+            "close_price": close_price,
+            "pnl": pnl_price,
+            "realized_pnl": realized,
+            "fee_total": fee_total,
+            "funding_total": 0.0,
+            "open_time": int(self.open_time or 0),
+            "close_time": int(self.close_time or 0),
+            "notional": self.cost_quote,
         }
 
 
@@ -290,24 +321,25 @@ def _is_stable_swap(pair: str) -> bool:
 # ---------- DB insert (incluye ignore_trade) ----------
 # ---------- DB insert (incluye ignore_trade) ----------
 INSERT_SQL = (
-    "INSERT OR IGNORE INTO closed_positions (" \
-    "exchange, symbol, side, size, entry_price, close_price, " \
-    "open_time, close_time, pnl, realized_pnl, funding_total, fee_total, " \
-    "pnl_percent, apr, initial_margin, notional, leverage, liquidation_price, ignore_trade" \
+    "INSERT OR IGNORE INTO closed_positions ("
+    "exchange, symbol, side, size, entry_price, close_price, "
+    "open_time, close_time, pnl, realized_pnl, funding_total, fee_total, "
+    "pnl_percent, apr, initial_margin, notional, leverage, liquidation_price, ignore_trade"
     ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
 
-def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any]):
+
+def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any], verbose: bool = False):
     # Métricas derivadas como en save_closed_position
-    size = _num(row.get('size'))
-    entry = _num(row.get('entry_price'))
-    close = _num(row.get('close_price'))
-    pnl   = _num(row.get('pnl'))
-    realized = _num(row.get('realized_pnl'))
-    notional = _num(row.get('notional')) or abs(size) * entry
-    fee_total = _num(row.get('fee_total'))
-    open_s = int(row.get('open_time') or 0)
-    close_s = int(row.get('close_time') or 0)
+    size = _num(row.get("size"))
+    entry = _num(row.get("entry_price"))
+    close = _num(row.get("close_price"))
+    pnl = _num(row.get("pnl"))
+    realized = _num(row.get("realized_pnl"))
+    notional = _num(row.get("notional")) or abs(size) * entry
+    fee_total = _num(row.get("fee_total"))
+    open_s = int(row.get("open_time") or 0)
+    close_s = int(row.get("close_time") or 0)
 
     # pnl_percent / apr sobre realized
     base_cap = notional if notional > 0 else max(abs(size) * entry, 1e-9)
@@ -316,9 +348,9 @@ def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any]):
     apr = pnl_percent * (365.0 / days) if days > 0 else 0.0
 
     vals = (
-        row.get('exchange', 'gate'),
-        row.get('symbol'),
-        row.get('side'),
+        row.get("exchange", "gate"),
+        row.get("symbol"),
+        row.get("side"),
         size,
         entry,
         close,
@@ -326,69 +358,79 @@ def _insert_row(conn: sqlite3.Connection, row: Dict[str, Any]):
         close_s,
         pnl,
         realized,
-        0.0,            # funding_total
+        0.0,  # funding_total
         fee_total,
         pnl_percent,
         apr,
-        None,           # initial_margin
+        None,  # initial_margin
         notional,
-        0.0,            # leverage
-        None,           # liquidation_price
-        int(bool(row.get('ignore_trade', False)))
+        0.0,  # leverage
+        None,  # liquidation_price
+        int(bool(row.get("ignore_trade", False))),
     )
     cur = conn.cursor()
     cur.execute(INSERT_SQL, vals)
-    
+
     # Opcional: mostrar si se insertó o se ignoró
-    if cur.rowcount == 0:
+    if cur.rowcount == 0 and verbose:
         print(f"⚠️  Duplicado ignorado: {row.get('symbol')} {row.get('side')} {close_s}")
+
+
 # ---------- Core ----------
-DUST_RATIO = 0.001  # 0.1% del pico de inventario; usa 0.0005 si quieres ser más estricto
-def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30, debug: bool = True) -> Tuple[int, int]:
+DUST_RATIO = (
+    0.001  # 0.1% del pico de inventario; usa 0.0005 si quieres ser más estricto
+)
+
+
+def save_gate_spot_positions(
+    db_path: str = "portfolio.db", days_back: int = 30, debug: bool = False
+) -> Tuple[int, int]:
     """
     Descarga fills spot, calcula FIFO y guarda rondas en closed_positions.
     Solo procesa trades que no existen en la base de datos.
     """
+
+    def _dbg(msg: str):
+        if debug:
+            print(msg)
+
     # --- umbral de "polvo" para cierre (0.1% del pico); mínimo absoluto 0.01 ---
     DUST_RATIO = 0.001
 
-    # Asegura DB/migración mínima
     from db_manager import init_db, migrate_spot_support
-    init_db(); migrate_spot_support()
 
-    # Obtener hashes de trades existentes
-    if debug:
-        print("🔍 Obteniendo trades existentes de la base de datos...")
+    init_db()
+    migrate_spot_support()
+
+    _dbg("🔍 Obteniendo trades existentes de la base de datos...")
     existing_hashes = get_existing_trade_hashes(db_path)
-    if debug:
-        print(f"📋 Trades existentes encontrados: {len(existing_hashes)}")
+    _dbg(f"📋 Trades existentes encontrados: {len(existing_hashes)}")
 
-    # Descargar solo trades nuevos
-    fills = fetch_spot_trades(days_back=days_back, limit=1000, existing_hashes=existing_hashes)
+    fills = fetch_spot_trades(
+        days_back=days_back,
+        limit=1000,
+        existing_hashes=existing_hashes,
+        debug=debug,
+    )
 
-    if debug:
-        print(f"🔎 GATE spot fills nuevos a procesar: {len(fills)}")
+    total_trades_found = len(fills)
+    _dbg(f"🔎 GATE spot fills nuevos a procesar: {total_trades_found}")
 
-    # Si no hay fills nuevos, terminar temprano
-    if not fills:
-        print("✅ No hay nuevos trades para procesar")
+    if total_trades_found == 0:
+        print(f"\n{'='*60}")
+        print("ℹ️  No se encontraron trades nuevos en GATE Spot")
+        print(f"{'='*60}")
         return 0, 0
-    # --- umbral de "polvo" para cierre (0.1% del pico); mínimo absoluto 0.01 ---
-    DUST_RATIO = 0.001
-
-    # Asegura DB/migración mínima (mantén tus funciones como en tu proyecto)
-    from db_manager import init_db, migrate_spot_support
-    init_db(); migrate_spot_support()
-
-    fills = fetch_spot_trades(days_back=days_back, limit=1000)
-
-    if debug:
-        print(f"🔎 GATE spot fills recibidos: {len(fills)}")
 
     # Balances spot para detectar retiros
     try:
         balances = fetch_gate_spot_balances()
-        spot_have = { (b.get('currency') or '').upper(): (float(b.get('available', 0) or 0) + float(b.get('locked', 0) or 0)) for b in balances }
+        spot_have = {
+            (b.get("currency") or "").upper(): (
+                float(b.get("available", 0) or 0) + float(b.get("locked", 0) or 0)
+            )
+            for b in balances
+        }
     except Exception:
         spot_have = {}
 
@@ -398,6 +440,8 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
         if _should_ignore_pair(f.pair):
             continue
         by_pair[f.pair].append(f)
+
+    symbols_with_trades = len(by_pair)
 
     saved = 0
     ignored = 0
@@ -412,28 +456,30 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
             # Inserta un registro por fill con PnL de precio + fees
             for f in trades:
                 fee_q = f.fee_in_quote()
-                received_quote = f.amount * f.price                         # USDT recibido (según trade)
-                net_base_out   = f.amount - (f.fee if f.fee_ccy.upper() == base else 0.0)  # USDC neto entregado
-                price_pnl      = received_quote - net_base_out             # referencia 1:1
-                fee_quote      = fee_q if f.fee_ccy.upper() == quote else 0.0
-                realized       = price_pnl - fee_quote
+                received_quote = f.amount * f.price  # USDT recibido (según trade)
+                net_base_out = f.amount - (
+                    f.fee if f.fee_ccy.upper() == base else 0.0
+                )  # USDC neto entregado
+                price_pnl = received_quote - net_base_out  # referencia 1:1
+                fee_quote = fee_q if f.fee_ccy.upper() == quote else 0.0
+                realized = price_pnl - fee_quote
 
                 row = {
-                    'exchange': 'gate',
-                    'symbol': f"{base}{quote}",
-                    'side': 'swapstable',
-                    'size': abs(net_base_out),
-                    'entry_price': 1.0,
-                    'close_price': 1.0,
-                    'pnl': price_pnl,
-                    'realized_pnl': realized,
-                    'fee_total': -abs(fee_q),          # fees totales llevadas a QUOTE
-                    'open_time': f.ts,
-                    'close_time': f.ts,
-                    'notional': max(received_quote, net_base_out),
-                    'ignore_trade': 0,
+                    "exchange": "gate",
+                    "symbol": f"{base}{quote}",
+                    "side": "swapstable",
+                    "size": abs(net_base_out),
+                    "entry_price": 1.0,
+                    "close_price": 1.0,
+                    "pnl": price_pnl,
+                    "realized_pnl": realized,
+                    "fee_total": -abs(fee_q),  # fees totales llevadas a QUOTE
+                    "open_time": f.ts,
+                    "close_time": f.ts,
+                    "notional": max(received_quote, net_base_out),
+                    "ignore_trade": 0,
                 }
-                _insert_row(conn, row)
+                _insert_row(conn, row, verbose=debug)
                 saved += 1
             continue
 
@@ -442,30 +488,30 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
 
         # Si el primer fill(s) es SELL → ignorar (depósito/transfer)
         idx = 0
-        while idx < len(trades) and trades[idx].side == 'sell':
+        while idx < len(trades) and trades[idx].side == "sell":
             f = trades[idx]
             fee_q = f.fee_in_quote()
             row = {
-                'exchange': 'gate',
-                'symbol': normalize_symbol(f"{base}{quote}"),
-                'side': 'spotsell',
-                'size': abs(f.amount),
-                'entry_price': f.price,
-                'close_price': f.price,
-                'pnl': 0.0,
-                'realized_pnl': 0.0,
-                'fee_total': -abs(fee_q),
-                'open_time': f.ts,
-                'close_time': f.ts,
-                'notional': abs(f.amount) * f.price,
-                'ignore_trade': 1,
+                "exchange": "gate",
+                "symbol": normalize_symbol(f"{base}{quote}"),
+                "side": "spotsell",
+                "size": abs(f.amount),
+                "entry_price": f.price,
+                "close_price": f.price,
+                "pnl": 0.0,
+                "realized_pnl": 0.0,
+                "fee_total": -abs(fee_q),
+                "open_time": f.ts,
+                "close_time": f.ts,
+                "notional": abs(f.amount) * f.price,
+                "ignore_trade": 1,
             }
-            _insert_row(conn, row)
+            _insert_row(conn, row, verbose=debug)
             ignored += 1
             idx += 1
 
         # Estado de la ronda FIFO
-        lot_q = deque()     # (qty_recibida_base, price, fee_per_unit_quote, ts)
+        lot_q = deque()  # (qty_recibida_base, price, fee_per_unit_quote, ts)
         round_agg = RoundAgg()
         round_started = False
         total_qty_in_round = 0.0
@@ -484,31 +530,35 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
                 return
             if not round_agg.is_valid():
                 # no hay ventas → nada que cerrar
-                round_agg = RoundAgg(); round_started = False
-                total_qty_in_round = 0.0; peak_inventory_base = 0.0
+                round_agg = RoundAgg()
+                round_started = False
+                total_qty_in_round = 0.0
+                peak_inventory_base = 0.0
                 return
 
             data = round_agg.finalize()
             # size real = pico máximo alcanzado en la ronda (no el remanente)
-            data['size'] = peak_inventory_base
+            data["size"] = peak_inventory_base
 
             row = {
-                'exchange': 'gate',
-                'symbol': normalize_symbol(f"{base}{quote}"),
-                'side': 'spotbuy',     # convención para UI/estrategia
-                'ignore_trade': 0,
+                "exchange": "gate",
+                "symbol": normalize_symbol(f"{base}{quote}"),
+                "side": "spotbuy",  # convención para UI/estrategia
+                "ignore_trade": 0,
                 **data,
             }
-            _insert_row(conn, row)
+            _insert_row(conn, row, verbose=debug)
             saved += 1
 
             # reset
-            round_agg = RoundAgg(); round_started = False
-            total_qty_in_round = 0.0; peak_inventory_base = 0.0
+            round_agg = RoundAgg()
+            round_started = False
+            total_qty_in_round = 0.0
+            peak_inventory_base = 0.0
 
         # Recorre los fills restantes
         for f in trades[idx:]:
-            if f.side == 'buy':
+            if f.side == "buy":
                 round_started = True
                 fee_q = f.fee_in_quote()
 
@@ -549,7 +599,7 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
                         take,
                         f.price,
                         fee_q * (take / sell_qty) if sell_qty > 0 else 0.0,
-                        f.ts
+                        f.ts,
                     )
 
                     # reducir lote
@@ -565,7 +615,9 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
 
                 # Criterio de cierre con polvo
                 dust = max(0.01, DUST_RATIO * peak_inventory_base)
-                if (inventory_base <= dust and total_qty_in_round >= 500) or (not lot_q and sell_left <= 1e-12):
+                if (inventory_base <= dust and total_qty_in_round >= 500) or (
+                    not lot_q and sell_left <= 1e-12
+                ):
                     _flush_round()
 
         # Al terminar el símbolo, ¿quedan lotes?
@@ -580,44 +632,59 @@ def save_gate_spot_positions(db_path: str = "portfolio.db", days_back: int = 30,
                 # Heurística de retiro solo si NO hubo ventas
                 # o si queda más que polvo y además no está en balances
                 bal_base = spot_have.get(base, 0.0)
-                if (not sells_occurred) or (rem_base > dust and bal_base < rem_base * 0.5):
+                if (not sells_occurred) or (
+                    rem_base > dust and bal_base < rem_base * 0.5
+                ):
                     # Retiro → ignorado
                     notional = sum(q * p for q, p, *_ in lot_q)
                     ts_open = min(ts for *_a, ts in lot_q)
                     row = {
-                        'exchange': 'gate',
-                        'symbol': normalize_symbol(f"{base}{quote}"),
-                        'side': 'spotbuy',
-                        'size': rem_base,
-                        'entry_price': notional / max(rem_base, 1e-12),
-                        'close_price': notional / max(rem_base, 1e-12),
-                        'pnl': 0.0,
-                        'realized_pnl': 0.0,
-                        'fee_total': 0.0,
-                        'open_time': ts_open,
-                        'close_time': ts_open,
-                        'notional': notional,
-                        'ignore_trade': 1,
+                        "exchange": "gate",
+                        "symbol": normalize_symbol(f"{base}{quote}"),
+                        "side": "spotbuy",
+                        "size": rem_base,
+                        "entry_price": notional / max(rem_base, 1e-12),
+                        "close_price": notional / max(rem_base, 1e-12),
+                        "pnl": 0.0,
+                        "realized_pnl": 0.0,
+                        "fee_total": 0.0,
+                        "open_time": ts_open,
+                        "close_time": ts_open,
+                        "notional": notional,
+                        "ignore_trade": 1,
                     }
-                    _insert_row(conn, row)
+                    _insert_row(conn, row, verbose=debug)
                     ignored += 1
                 # si hubo ventas y rem_base > dust → ronda queda abierta (para futuras ventas)
 
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
-    if debug:
-        print(f"✅ Spot FIFO Gate: guardadas={saved}, ignoradas={ignored}")
+    print(f"\n{'='*60}")
+    print("✅ GATE Spot FIFO COMPLETADO:")
+    print(f"   📈 Símbolos con trades: {symbols_with_trades}")
+    print(f"   🔢 Trades procesados: {total_trades_found}")
+    print(f"   💾 Posiciones guardadas: {saved}")
+    print(f"   ⚠️  Posiciones ignoradas: {ignored}")
+    print(f"{'='*60}")
+
     return saved, ignored
 
 
-
 # ---------- CLI ----------
-if __name__ == '__main__':
+if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Gate.io Spot FIFO → closed_positions')
-    parser.add_argument('--db', type=str, default=DB_PATH_DEFAULT, help='Ruta a portfolio.db')
-    parser.add_argument('--days_back', type=int, default=30, help='Ventana de histórico (días)')
-    parser.add_argument('--debug', action='store_true', help='Logs verbosos')
+
+    parser = argparse.ArgumentParser(description="Gate.io Spot FIFO → closed_positions")
+    parser.add_argument(
+        "--db", type=str, default=DB_PATH_DEFAULT, help="Ruta a portfolio.db"
+    )
+    parser.add_argument(
+        "--days_back", type=int, default=30, help="Ventana de histórico (días)"
+    )
+    parser.add_argument("--debug", action="store_true", help="Logs verbosos")
     args = parser.parse_args()
 
-    save_gate_spot_positions(db_path=args.db, days_back=args.days_back, debug=args.debug or True)
+    save_gate_spot_positions(
+        db_path=args.db, days_back=args.days_back, debug=args.debug
+    )

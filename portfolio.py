@@ -27,6 +27,9 @@ from db_manager import (
     upsert_funding_events,
     last_funding_ts,
     load_funding,
+    save_position_override_db,
+    get_position_overrides_db,
+    load_all_position_overrides_db,
 )
 
 # En portfoliov7.8.py
@@ -38,6 +41,7 @@ from adapters.mexc_spot_trades import save_mexc_spot_positions
 
 from universal_cache import (
     init_universal_cache_db,
+    init_selected_open_exchanges_table,
     update_cache_from_positions,
     get_cache_stats,
     add_manual_pair,
@@ -45,6 +49,9 @@ from universal_cache import (
     get_last_sync_timestamp,
     detect_closed_positions,
     get_cached_symbols,
+    get_selected_open_exchanges,
+    set_selected_open_exchanges,
+    remove_from_universal_cache,
 )
 
 
@@ -74,7 +81,14 @@ def smart_sync_closed_positions(
             print(f"⏭️  {exchange_name} deshabilitado en CLOSED_EXCHANGES")
         return 0
 
+    preferred = set(_preferred_position_exchanges())
+    if preferred and exchange_name not in preferred:
+        if debug:
+            print(f"⏭️  {exchange_name} omitido: no está seleccionado en Open Positions")
+        return 0
+
     # 1. Obtener posiciones abiertas actuales
+    fetch_error = False
     try:
         fetch_positions = POSITIONS_FUNCTIONS.get(exchange_name)
         if not fetch_positions:
@@ -85,23 +99,40 @@ def smart_sync_closed_positions(
 
     except Exception as e:
         print(f"⚠️  Error obteniendo posiciones abiertas de {exchange_name}: {e}")
+        fetch_error = True
         current_positions = []
+
+    if fetch_error:
+        return 0
+
+    cached_symbols = get_cached_symbols(exchange_name, "cache.db")
 
     # 2. Detectar cambios (posiciones cerradas)
     disappeared_symbols = detect_closed_positions(
         exchange_name, current_positions, "cache.db"
     )
-    # ✅ DEBUG
-    print(f"🔍 {exchange_name}:")
-    print(f"   📦 Posiciones actuales: {[p.get('symbol') for p in current_positions]}")
-    print(
-        f"   🗄️  Cache tiene: {get_cached_symbols(exchange_name, "cache.db")}"
-    )  # Nueva función helper
-    print(f"   🎯 Detectadas cerradas: {disappeared_symbols}")
+
+    if debug:
+        detail_lines = []
+        if current_positions:
+            detail_lines.append(
+                f"   📦 Posiciones actuales: {[p.get('symbol') for p in current_positions]}"
+            )
+        if cached_symbols:
+            detail_lines.append(f"   🗄️  Cache tiene: {cached_symbols}")
+        if disappeared_symbols:
+            detail_lines.append(f"   🎯 Detectadas cerradas: {disappeared_symbols}")
+
+        if detail_lines:
+            print(f"🔍 {exchange_name}:")
+            for line in detail_lines:
+                print(line)
 
     # 3. Calcular ventana temporal
     last_sync_ms = get_last_sync_timestamp(exchange_name, "cache.db")
     now_ms = int(time.time() * 1000)
+
+    symbols_to_drop = set(disappeared_symbols)
 
     if force_full_sync or last_sync_ms is None:
         # Sync completo
@@ -110,7 +141,7 @@ def smart_sync_closed_positions(
         if debug:
             print(f"🔄 {exchange_name}: Sync completo ({reason}) - {days_to_sync} días")
 
-    elif disappeared_symbols:
+    elif symbols_to_drop:
         # Hay posiciones cerradas detectadas → sync desde last_sync con buffer
         lookback_ms = (
             FUNDING_GRACE_HOURS * 3600 * 1000
@@ -128,9 +159,7 @@ def smart_sync_closed_positions(
             print(f"   Sync desde: {_fmt_ms(since_ms)} ({days_to_sync} días)")
 
     else:
-        # No hay cambios → skip
-        if debug:
-            print(f"✅ {exchange_name}: Sin cambios detectados, skip sync")
+        # No hay cambios → skip silencioso
         return 0
 
     # 4. Ejecutar sync con la función del adapter
@@ -156,7 +185,19 @@ def smart_sync_closed_positions(
 
         # 5. Actualizar timestamps y caché
         update_sync_timestamp(exchange_name, "cache.db")
-        update_cache_from_positions(exchange_name, current_positions, "cache.db")
+        update_cache_from_positions(
+            exchange_name, current_positions, "cache.db", log_summary=False
+        )
+
+        if symbols_to_drop:
+            removed = remove_from_universal_cache(
+                exchange_name, list(symbols_to_drop), "cache.db"
+            )
+            if debug and removed:
+                print(
+                    f"🗑️  {exchange_name}: {removed} símbolos eliminados del cache universal"
+                )
+            _trigger_spot_fifo_sync(exchange_name)
 
         if debug:
             print(f"✅ {exchange_name}: {saved} posiciones guardadas")
@@ -215,6 +256,7 @@ CLOSED_EXCHANGES = {
     "xt": False,
     "bybit": False,
     "lbank": False,
+    "pacifica": False,
 }
 
 
@@ -245,6 +287,7 @@ BALANCE_EXCHANGES = {
     "xt": False,
     "bybit": True,
     "lbank": True,
+    "pacifica": True,
 }
 
 # =========================
@@ -640,11 +683,12 @@ from adapters.okx import (
     save_okx_closed_positions,
 )
 
-from adapters.paradexv9s import (
-    fetch_paradex_open_positions,
+# from adapters.paradex10 import fetch_paradex_open_positions
+from adapters.paradexv9_3s import (
     fetch_paradex_funding_fees,
     fetch_paradex_all_balances,
     save_paradex_closed_positions,
+    fetch_paradex_open_positions,
 )
 
 from adapters.hyperliquidv5 import (
@@ -674,11 +718,26 @@ from adapters.bybit import (
     fetch_bybit_all_balances,
     save_bybit_closed_positions,
 )
+
 # from adapters.lbank_adapter_SDK import (
 #     fetch_lbank_all_balances,
 #     save_lbank_closed_positions,
 # )
 
+from adapters.pacifica import (
+    fetch_pacifica_all_balances,
+    fetch_pacifica_open_positions,
+    fetch_pacifica_funding_fees,
+    save_pacifica_closed_positions,
+)
+
+from adapters.bitrue import (
+    fetch_bitrue_all_balances,
+    fetch_bitrue_open_positions,
+    fetch_bitrue_funding_fees,
+    save_bitrue_closed_positions,
+    BitrueWebSocket,
+)
 
 __all__ = [
     "fetch_bingx_all_balances",
@@ -693,6 +752,19 @@ def should_sync_spot(exchange_name):
     if SPOT_TRADE_ALL:
         return True
     return SPOT_TRADE_EXCHANGES.get(exchange_name, False)
+
+
+def _trigger_spot_fifo_sync(exchange_name: str):
+    preferred = set(_preferred_position_exchanges())
+    if preferred and exchange_name not in preferred:
+        return
+    spot_fn = SPOT_SYNC_FUNCTIONS.get(exchange_name)
+    if not spot_fn or not should_sync_spot(exchange_name):
+        return
+    try:
+        spot_fn()
+    except Exception as exc:
+        print(f"⚠️  Spot FIFO sync error para {exchange_name}: {exc}")
 
 
 # listen_key = get_listen_key()
@@ -759,6 +831,7 @@ def main_balances():
         "whitebit": lambda: fetch_whitebit_all_balances(),
         "xt": lambda: fetch_xt_all_balances(db_path="portfolio.db"),
         "bybit": lambda: fetch_bybit_all_balances(db_path="portfolio.db"),
+        "bitrue": lambda: fetch_bitrue_all_balances(db_path="portfolio.db"),
         # "lbank": lambda: fetch_lbank_all_balances(db_path="portfolio.db"),
     }
 
@@ -789,12 +862,149 @@ from uuid import uuid4
 
 MANUAL_OPEN_POS = {}  # manual_id -> dict
 
+# =============== MANUAL OPEN POSITIONS PERSISTENCE ===============
+
+
+def _init_manual_open_table(db_path: str = "cache.db"):
+    """Create table for manual open positions if not exists"""
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS manual_open_positions (
+            manual_id TEXT PRIMARY KEY,
+            exchange TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            side TEXT NOT NULL,
+            size REAL,
+            entry_price REAL,
+            open_time INTEGER,
+            leverage REAL,
+            liquidation_price REAL,
+            initial_margin REAL,
+            notional REAL,
+            fee_total REAL,
+            funding_total REAL,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            updated_at INTEGER DEFAULT (strftime('%s', 'now'))
+        )
+    """
+    )
+    conn.commit()
+    conn.close()
+
+
+def _save_manual_open_to_db(manual: dict, db_path: str = "cache.db"):
+    """Persist a manual open position to database"""
+    import sqlite3
+
+    _init_manual_open_table(db_path)
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO manual_open_positions
+        (manual_id, exchange, symbol, side, size, entry_price, open_time, 
+         leverage, liquidation_price, initial_margin, notional, fee_total, funding_total, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """,
+        (
+            manual["manual_id"],
+            manual["exchange"],
+            manual["symbol"],
+            manual["side"],
+            manual.get("size"),
+            manual.get("entry_price"),
+            manual.get("open_time"),
+            manual.get("leverage"),
+            manual.get("liquidation_price"),
+            manual.get("initial_margin"),
+            manual.get("notional"),
+            manual.get("fee_total"),
+            manual.get("funding_total"),
+            int(time.time()),
+        ),
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def _delete_manual_open_from_db(manual_id: str, db_path: str = "cache.db"):
+    """Remove a manual open position from database"""
+    import sqlite3
+
+    _init_manual_open_table(db_path)
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM manual_open_positions WHERE manual_id = ?", (manual_id,)
+    )
+    conn.commit()
+    conn.close()
+
+
+def _load_manual_open_from_db(db_path: str = "cache.db") -> dict:
+    """Load all manual open positions from database into memory"""
+    import sqlite3
+
+    _init_manual_open_table(db_path)
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM manual_open_positions")
+    rows = cursor.fetchall()
+    conn.close()
+
+    loaded = {}
+    for row in rows:
+        manual = {
+            "manual_id": row["manual_id"],
+            "exchange": row["exchange"],
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "size": row["size"],
+            "entry_price": row["entry_price"],
+            "open_time": row["open_time"],
+            "leverage": row["leverage"],
+            "liquidation_price": row["liquidation_price"],
+            "initial_margin": row["initial_margin"],
+            "notional": row["notional"],
+            "fee_total": row["fee_total"],
+            "funding_total": row["funding_total"],
+            "_source": "manual",
+        }
+        loaded[manual["manual_id"]] = manual
+
+    return loaded
+
+
+# Load manual positions on startup
+try:
+    MANUAL_OPEN_POS = _load_manual_open_from_db("cache.db")
+    if MANUAL_OPEN_POS:
+        print(f"✅ Loaded {len(MANUAL_OPEN_POS)} manual open positions from DB")
+except Exception as e:
+    print(f"⚠️ Could not load manual open positions: {e}")
+    MANUAL_OPEN_POS = {}
+
 VALID_SIDES = {"long", "short", "spotbuy", "spotsell"}
 VALID_EXCHANGES_MANUAL = [
     "Arbitrum",
-    "Base OKX",
+    "Binance",
+    "Bingx",
+    "Bitget" "Base OKX",
     "BNB OKX",
     "Ethereum OKX",
+    "EdgeX",
+    "Kcex",
     "Lbank",
     "Ourbit",
     "Solana JUP",
@@ -805,6 +1015,137 @@ def _now_s():
     import time
 
     return int(time.time())
+
+
+def _safe_float(value):
+    """Best-effort float conversion without raising."""
+    if value in (None, "", "null", "NULL"):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _manual_counter_side(side: str) -> str | None:
+    side = (side or "").lower()
+    mapping = {
+        "long": "short",
+        "spotbuy": "short",
+        "short": "long",
+        "spotsell": "long",
+    }
+    return mapping.get(side)
+
+
+def _build_manual_reference_index(positions: list[dict]) -> dict[str, list[dict]]:
+    """Index API positions by base symbol to inherit marks for manual entries."""
+    index: dict[str, list[dict]] = {}
+    for pos in positions or []:
+        if not isinstance(pos, dict):
+            continue
+        if (pos.get("_source") or "").lower() == "manual":
+            continue
+        base = _base_symbol(pos.get("symbol")) if pos.get("symbol") else None
+        if not base:
+            continue
+        mark = _safe_float(pos.get("mark_price"))
+        if mark is None or mark <= 0:
+            continue
+        entry = _safe_float(pos.get("entry_price"))
+        index.setdefault(base, []).append(
+            {
+                "exchange": pos.get("exchange"),
+                "symbol": pos.get("symbol"),
+                "side": (pos.get("side") or "").lower(),
+                "mark_price": mark,
+                "entry_price": entry,
+            }
+        )
+    return index
+
+
+def _select_reference_for_manual(
+    base_symbol: str | None, side: str | None, ref_index: dict[str, list[dict]]
+) -> dict | None:
+    if not base_symbol:
+        return None
+    candidates = ref_index.get(base_symbol) or []
+    if not candidates:
+        return None
+    target_side = _manual_counter_side(side or "")
+    if target_side:
+        for cand in candidates:
+            if cand.get("side") == target_side:
+                return cand
+    # Prefer same side next, then first available
+    norm_side = (side or "").lower()
+    for cand in candidates:
+        if cand.get("side") == norm_side:
+            return cand
+    return candidates[0]
+
+
+def _calc_manual_unrealized(
+    side: str | None, entry: float | None, mark: float | None, size: float | None
+) -> float | None:
+    if entry is None or mark is None or size in (None, 0):
+        return None
+    abs_size = abs(size)
+    side_norm = (side or "").lower()
+    if side_norm in ("short", "spotsell"):
+        return (entry - mark) * abs_size
+    return (mark - entry) * abs_size
+
+
+def _enrich_manual_position(manual: dict, ref_index: dict[str, list[dict]]) -> dict:
+    """Add derived metrics (mark, notional, PnL) before returning manual positions."""
+    enriched = dict(manual or {})
+    enriched.setdefault("_source", "manual")
+    side = (enriched.get("side") or "").lower()
+    base_symbol = (
+        _base_symbol(enriched.get("symbol")) if enriched.get("symbol") else None
+    )
+    size = _safe_float(enriched.get("size"))
+    entry = _safe_float(enriched.get("entry_price"))
+    mark = _safe_float(enriched.get("mark_price"))
+
+    if (mark is None or mark <= 0) and base_symbol:
+        ref = _select_reference_for_manual(base_symbol, side, ref_index)
+        if ref:
+            mark = _safe_float(ref.get("mark_price"))
+            if mark is not None:
+                enriched["mark_price"] = mark
+                if ref.get("exchange"):
+                    enriched["mark_price_source_exchange"] = ref.get("exchange")
+                if ref.get("symbol"):
+                    enriched["mark_price_source_symbol"] = ref.get("symbol")
+    if mark is None and entry is not None:
+        mark = entry
+        enriched["mark_price"] = mark
+
+    abs_size = abs(size) if size not in (None, 0) else None
+    if mark is not None and abs_size:
+        if enriched.get("notional") in (None, ""):
+            enriched["notional"] = abs_size * mark
+        unrealized = _calc_manual_unrealized(side, entry, mark, size)
+        if unrealized is not None:
+            enriched["unrealized_pnl"] = unrealized
+
+    fee_total_val = _safe_float(enriched.get("fee_total"))
+    funding_total_val = _safe_float(enriched.get("funding_total"))
+    if enriched.get("fee") is None and fee_total_val is not None:
+        enriched["fee"] = fee_total_val
+    if enriched.get("funding_fee") is None and funding_total_val is not None:
+        enriched["funding_fee"] = funding_total_val
+    if enriched.get("realized_pnl") is None and (
+        fee_total_val is not None or funding_total_val is not None
+    ):
+        enriched["realized_pnl"] = (fee_total_val or 0.0) + (funding_total_val or 0.0)
+
+    return enriched
 
 
 def add_manual_open_to_cache(payload: dict) -> dict:
@@ -843,9 +1184,16 @@ def add_manual_open_to_cache(payload: dict) -> dict:
         "_source": "manual",
     }
     MANUAL_OPEN_POS[manual["manual_id"]] = manual
+
+    # ✅ Persist to database
+    try:
+        _save_manual_open_to_db(manual, "cache.db")
+    except Exception as e:
+        print(f"⚠️ Could not save manual position to DB: {e}")
+
     # Inyectar al cache universal de abiertas para que se vea y empareje
     try:
-        update_cache_from_positions(exchange, [manual], "cache.db")
+        update_cache_from_positions(exchange, [manual], "cache.db", log_summary=True)
     except Exception:
         pass
     return manual
@@ -855,13 +1203,117 @@ def delete_manual_open(manual_id: str) -> bool:
     data = MANUAL_OPEN_POS.pop(manual_id, None)
     if not data:
         return False
+
+    # ✅ Delete from database
+    try:
+        _delete_manual_open_from_db(manual_id, "cache.db")
+    except Exception as e:
+        print(f"⚠️ Could not delete manual position from DB: {e}")
+
     # Saca del cache universal (según cómo lo almacenes; aquí forzamos refresh mínimo)
     try:
         # Si tienes una función específica para "remove", úsala. Si no, refresca recalculando.
-        update_cache_from_positions(data["exchange"], [], "cache.db")
+        update_cache_from_positions(data["exchange"], [], "cache.db", log_summary=False)
     except Exception:
         pass
     return True
+
+
+# =============== POSITION OVERRIDES (manual edits) ===============
+
+POSITION_OVERRIDES = {}  # Cache en memoria, se carga desde DB al inicio
+
+
+def load_position_overrides_into_memory():
+    """Load all position overrides from database into memory cache"""
+    global POSITION_OVERRIDES
+    POSITION_OVERRIDES = load_all_position_overrides_db()
+    print(f"✅ Loaded {len(POSITION_OVERRIDES)} position overrides from database")
+
+
+def get_position_override_key(exchange: str, symbol: str) -> str:
+    """Generate cache key for position overrides"""
+    return f"{exchange.lower()}_{symbol.upper()}"
+
+
+def save_position_override(exchange: str, symbol: str, overrides: dict) -> None:
+    """
+    Save manual overrides for a position to database and memory.
+
+    Args:
+        exchange: Exchange name
+        symbol: Trading symbol
+        overrides: Dict of field overrides with values
+    """
+    key = get_position_override_key(exchange, symbol)
+
+    # Get existing overrides or create new
+    if key not in POSITION_OVERRIDES:
+        POSITION_OVERRIDES[key] = {}
+
+    # Update with new overrides
+    timestamp = int(time.time())
+    for field, value in overrides.items():
+        if value is not None:
+            # Save to database
+            save_position_override_db(exchange, symbol, field, value, timestamp)
+
+            # Update memory cache
+            POSITION_OVERRIDES[key][field] = {"value": value, "timestamp": timestamp}
+
+    # Track margin changes specifically for APR calculation
+    if "main_margin" in overrides and overrides["main_margin"] is not None:
+        if "margin_history" not in POSITION_OVERRIDES[key]:
+            POSITION_OVERRIDES[key]["margin_history"] = []
+
+        POSITION_OVERRIDES[key]["margin_history"].append(
+            {"value": overrides["main_margin"], "timestamp": timestamp}
+        )
+
+        # Save margin history to DB as JSON
+        import json
+
+        save_position_override_db(
+            exchange,
+            symbol,
+            "margin_history",
+            json.dumps(POSITION_OVERRIDES[key]["margin_history"]),
+            timestamp,
+        )
+
+
+def get_position_overrides(exchange: str, symbol: str) -> dict:
+    """Get manual overrides for a position from memory (loaded from DB)"""
+    key = get_position_override_key(exchange, symbol)
+    return POSITION_OVERRIDES.get(key, {})
+
+
+def apply_position_overrides(position: dict) -> dict:
+    """
+    Apply manual overrides to a position dict.
+    Manual values always take precedence over API values.
+    """
+    exchange = position.get("exchange", "")
+    symbol = position.get("symbol", "")
+
+    overrides = get_position_overrides(exchange, symbol)
+    if not overrides:
+        return position
+
+    # Apply each override
+    for field, data in overrides.items():
+        if field == "margin_history":
+            # Don't override, keep history
+            position["margin_history"] = data
+        elif isinstance(data, dict) and "value" in data:
+            position[field] = data["value"]
+            # Mark that this field has been manually edited
+            if "manual_edits" not in position:
+                position["manual_edits"] = []
+            if field not in position["manual_edits"]:
+                position["manual_edits"].append(field)
+
+    return position
 
 
 # ===============Codigo para insertar funding en base de datos
@@ -896,6 +1348,7 @@ FUNDING_PULLERS = {
     "hyperliquid": lambda: fetch_hyperliquid_funding_fees(limit=1000),
     "whitebit": lambda: fetch_whitebit_funding_fees(limit=1000),
     "xt": lambda: fetch_xt_funding_fees(limit=1000),
+    "pacifica": lambda: fetch_pacifica_funding_fees(limit=1000),
 }
 
 
@@ -1187,9 +1640,15 @@ def api_funding_open_positions():
     Formato: {exchange: {symbol: {d2: X, d1: Y, today: Z}}}
     """
     try:
+        # Limitar a los exchanges persistidos en cache (o todos si no hay preferencia)
+        preferred_exchanges = _preferred_position_exchanges()
+
         # Obtener posiciones abiertas actuales
         current_positions = {}
-        for ex_name, fetch_func in POSITIONS_FUNCTIONS.items():
+        for ex_name in preferred_exchanges:
+            fetch_func = POSITIONS_FUNCTIONS.get(ex_name)
+            if not fetch_func:
+                continue
             try:
                 positions = fetch_func()
                 for pos in positions:
@@ -1284,10 +1743,26 @@ def api_funding():
     try:
         # 1) Forzar sync si se pide (?refresh=1) y, opcionalmente, con días forzados
         force_days_q = request.args.get("days", default=None, type=int)
+        preferred_exchanges = _preferred_position_exchanges()
+        preferred_exchanges = [
+            (ex or "").strip().lower()
+            for ex in preferred_exchanges
+            if (ex or "").strip()
+        ]
+
+        exchanges_param = request.args.get("exchanges")
+        requested_exchanges = []
+        if exchanges_param:
+            requested_exchanges = [
+                ex.strip().lower() for ex in exchanges_param.split(",") if ex.strip()
+            ]
+
         if request.args.get("refresh") == "1":
             sync_all_funding(
-                force_days=force_days_q, verbose=False
-            )  # usa None si no hay número
+                exchanges=requested_exchanges or preferred_exchanges,
+                force_days=force_days_q,
+                verbose=False,
+            )
 
         # 2) Parse robusto de 'days' (puede venir None/''/'none'/'null' o un número)
         raw_days = request.args.get("days", default=None)
@@ -1306,8 +1781,13 @@ def api_funding():
             days = FUNDING_DEFAULT_DAYS
 
         exchange = request.args.get("exchange")
+        exchange = (exchange or "").strip().lower() or None
         symbol = request.args.get("symbol")
         include_estimates = request.args.get("estimates", "1") != "0"
+
+        exchange_filter_list = requested_exchanges or preferred_exchanges
+        if not exchange_filter_list:
+            exchange_filter_list = None
 
         data = load_funding(
             days=days,
@@ -1315,17 +1795,23 @@ def api_funding():
             symbol=symbol,
             include_estimates=include_estimates,
             limit=10000,
+            exchanges=None if exchange else exchange_filter_list,
         )
 
         # Si la tabla está vacía y está activado el auto-sync en vacío, dispara una vez
         if not data and SYNC_FUNDING_ON_EMPTY:
-            sync_all_funding(force_days=force_days_q, verbose=False)
+            sync_all_funding(
+                exchanges=requested_exchanges or preferred_exchanges,
+                force_days=force_days_q,
+                verbose=False,
+            )
             data = load_funding(
                 days=days,
                 exchange=exchange,
                 symbol=symbol,
                 include_estimates=include_estimates,
                 limit=10000,
+                exchanges=None if exchange else exchange_filter_list,
             )
 
         return jsonify({"funding": data})
@@ -1372,7 +1858,7 @@ def api_closed_positions():
         cur = conn.cursor()
         cur.execute(
             """
-             SELECT exchange, symbol, side, size, entry_price, close_price, pnl,
+             SELECT id, exchange, symbol, side, size, entry_price, close_price, pnl,
                     realized_pnl, funding_total AS funding_fee,
                     fee_total AS fees, pnl_percent, apr, initial_margin, notional, 
                     open_time, close_time
@@ -1767,7 +2253,12 @@ def api_closed_positions():
 
 @app.route("/")
 def index():
-    return render_template(TEMPLATE_FILE)
+    response = app.make_response(render_template(TEMPLATE_FILE))
+    # Desactivar cache solo para la página principal (desarrollo)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 @app.route("/api/balances")
@@ -1921,6 +2412,15 @@ def get_balances():
     except Exception as e:
         print(f"❌ Paradex balances error: {e}")
 
+    # Pacifica
+    try:
+        pacifica_data = fetch_pacifica_all_balances()
+        if pacifica_data:
+            balances.append(pacifica_data)
+        print("✅ Pacifica balances OK")
+    except Exception as e:
+        print(f"❌ Pacifica balances error: {e}")
+
     # Hyperliquid
     try:
         hyper_data = fetch_hyperliquid_all_balances()
@@ -1968,17 +2468,39 @@ def get_balances():
 @app.route("/api/positions", methods=["GET", "POST"])
 def get_positions():
     # Obtener exchanges seleccionados desde POST body
-    selected_exchanges = []
+    selected_exchanges: list[str] = []
+    persist_selection = False
     if request.method == "POST":
         try:
-            payload = request.get_json() or {}
-            selected_exchanges = payload.get("exchanges", [])
-        except:
-            pass
+            payload = request.get_json(silent=True) or {}
+            raw_list = payload.get("exchanges") or []
+            if isinstance(raw_list, list):
+                normalized = []
+                seen = set()
+                for ex in raw_list:
+                    key = (ex or "").strip().lower()
+                    if not key or key in seen:
+                        continue
+                    seen.add(key)
+                    normalized.append(key)
+                if normalized:
+                    selected_exchanges = normalized
+                    persist_selection = True
+        except Exception as exc:
+            print(f"⚠️ No se pudo parsear la selección de exchanges: {exc}")
 
-    # Si no hay selección, usar todos
     if not selected_exchanges:
-        selected_exchanges = list(POSITIONS_FUNCTIONS.keys())
+        cached_selection = get_selected_open_exchanges(CACHE_DB_PATH)
+        if cached_selection:
+            selected_exchanges = cached_selection
+        else:
+            selected_exchanges = list(POSITIONS_FUNCTIONS.keys())
+
+    if persist_selection:
+        try:
+            set_selected_open_exchanges(selected_exchanges, CACHE_DB_PATH)
+        except Exception as exc:
+            print(f"⚠️ No se pudo guardar la preferencia de exchanges: {exc}")
 
     print(f"📡 Solicitando posiciones de: {selected_exchanges}")
     all_positions = []
@@ -1990,15 +2512,34 @@ def get_positions():
             fetch_func = POSITIONS_FUNCTIONS[exchange_name]
             positions = fetch_func()
             all_positions.extend(positions)
-            # Actualizar cache
-            update_cache_from_positions(exchange_name, positions)
+            # Actualizar cache sin spamear logs para llamadas de UI
+            update_cache_from_positions(
+                exchange_name, positions, CACHE_DB_PATH, log_summary=False
+            )
         except Exception as e:
             print(f"❌ {exchange_name} error: {e}")
 
-    # Actualizar funding para exchanges con posiciones
-    active_exchanges = list(
-        set(p.get("exchange") for p in all_positions if p.get("exchange"))
-    )
+    if MANUAL_OPEN_POS:
+        ref_index = _build_manual_reference_index(all_positions)
+        manual_positions = [
+            _enrich_manual_position(pos, ref_index) for pos in MANUAL_OPEN_POS.values()
+        ]
+        all_positions.extend(manual_positions)
+
+    # ✅ Apply manual overrides to all positions
+    all_positions = [apply_position_overrides(pos) for pos in all_positions]
+
+    # Actualizar funding solo para exchanges "reales" con posiciones
+    active_exchanges = []
+    seen_active = set()
+    for pos in all_positions:
+        ex_name = (pos.get("exchange") or "").strip().lower()
+        if not ex_name or pos.get("_source") == "manual":
+            continue
+        if ex_name in seen_active:
+            continue
+        seen_active.add(ex_name)
+        active_exchanges.append(ex_name)
     if active_exchanges:
         try:
             sync_all_funding(exchanges=active_exchanges, verbose=False)
@@ -2007,6 +2548,14 @@ def get_positions():
 
     print(f"📊 Total posiciones: {len(all_positions)}")
     return jsonify({"positions": all_positions})
+
+
+@app.get("/api/positions/exchanges")
+def get_position_exchange_preferences():
+    saved = get_selected_open_exchanges(CACHE_DB_PATH)
+    if not saved:
+        saved = list(POSITIONS_FUNCTIONS.keys())
+    return jsonify({"exchanges": saved})
 
 
 # =====================================================
@@ -2050,7 +2599,20 @@ SYNC_FUNCTIONS = {
     "bybit": lambda days=60: save_bybit_closed_positions(
         "portfolio.db", days=days, debug=False
     ),
-    "lbank": lambda days=60: save_lbank_closed_positions("portfolio.db", days=days),
+    "pacifica": lambda days=30: save_pacifica_closed_positions(
+        "portfolio.db", days=days, debug=PRINT_CLOSED_DEBUG
+    ),
+    # "lbank": lambda days=60: save_lbank_closed_positions("portfolio.db", days=days),
+    "bitrue": lambda days=30: save_bitrue_closed_positions(
+        "portfolio.db", days=days, debug=PRINT_CLOSED_DEBUG
+    ),
+}
+
+SPOT_SYNC_FUNCTIONS = {
+    "gate": lambda: save_gate_spot_positions("portfolio.db", days_back=40),
+    "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
+    "xt": lambda: save_xt_spot_positions("portfolio.db", days_back=40),
+    "mexc": lambda: save_mexc_spot_positions(db_path="portfolio.db", days_back=40),
 }
 
 # Diccionario de funciones para obtener posiciones abiertas
@@ -2071,29 +2633,48 @@ POSITIONS_FUNCTIONS = {
     "whitebit": lambda: fetch_whitebit_open_positions(),
     "xt": lambda: fetch_xt_open_positions(),
     "bybit": lambda: fetch_bybit_open_positions(),
+    "pacifica": lambda: fetch_pacifica_open_positions(),
 }
+
+
+def _preferred_position_exchanges() -> list[str]:
+    saved = get_selected_open_exchanges(CACHE_DB_PATH)
+    if saved:
+        return saved
+    return list(POSITIONS_FUNCTIONS.keys())
 
 
 # borrar despues
 def main():
     print("🚀 Iniciando actualización de portfolio.")
     # Inicializar cache universal
-    init_universal_cache_db()
+    init_universal_cache_db(CACHE_DB_PATH)
+    init_selected_open_exchanges_table(CACHE_DB_PATH)
 
-    # ✅ Actualizar cache para TODOS los exchanges que tengan posiciones abiertas
-    print("🔄 Actualizando cache universal para todos los exchanges...")
+    # ✅ Actualizar cache solo para los exchanges seleccionados (o todos si no hay preferencia)
+    preferred_exchanges = get_selected_open_exchanges(CACHE_DB_PATH)
+    target_exchanges = preferred_exchanges or list(POSITIONS_FUNCTIONS.keys())
+    active_selection = set(target_exchanges)
 
-    for ex_name, fetch_positions_func in POSITIONS_FUNCTIONS.items():
-        if should_sync(ex_name):
-            try:
-                print(f"   📦 {ex_name.capitalize()}: obteniendo posiciones...")
-                positions = fetch_positions_func()
-                update_cache_from_positions(ex_name, positions, "cache.db")
-                print(
-                    f"   ✅ {ex_name.capitalize()}: {len(positions)} posiciones en cache"
-                )
-            except Exception as e:
-                print(f"   ⚠️ {ex_name.capitalize()}: error - {e}")
+    if preferred_exchanges:
+        print(
+            "🔄 Actualizando cache universal para exchanges preferidos: "
+            + ", ".join(preferred_exchanges)
+        )
+    else:
+        print("🔄 Actualizando cache universal para todos los exchanges...")
+
+    for ex_name in target_exchanges:
+        fetch_positions_func = POSITIONS_FUNCTIONS.get(ex_name)
+        if not fetch_positions_func:
+            print(f"   ⚠️ {ex_name}: no hay adapter de posiciones definidas")
+            continue
+        try:
+            positions = fetch_positions_func()
+            update_cache_from_positions(ex_name, positions, CACHE_DB_PATH)
+            print(f"   ✅ {ex_name.capitalize()}: {len(positions)} posiciones en cache")
+        except Exception as e:
+            print(f"   ⚠️ {ex_name.capitalize()}: error - {e}")
 
     # Mostrar estadísticas del cache
     stats = get_cache_stats("cache.db")
@@ -2111,6 +2692,12 @@ def main():
         # (2) Bucle normal para el resto de exchanges
         total_saved = 0
         for exchange_name in SYNC_FUNCTIONS.keys():
+            if active_selection and exchange_name not in active_selection:
+                if PRINT_CLOSED_SYNC:
+                    print(
+                        f"⏭️  Saltando {exchange_name} en Smart Sync (no está en selección de open positions)"
+                    )
+                continue
             try:
                 saved = smart_sync_closed_positions(
                     exchange_name,
@@ -2164,26 +2751,6 @@ def main():
                     print(f"❌ Error en {exchange_name}: {e}")
             else:
                 print(f"⏭️  Saltando {exchange_name.capitalize()}")
-
-    # 📦 SPOT TRADES SYNC (unificado con futures)
-    # =====================================================
-    spot_sync_functions = {
-        "gate": lambda: save_gate_spot_positions("portfolio.db", days_back=40),
-        "bitget": lambda: save_bitget_spot_positions("portfolio.db", days_back=40),
-        "xt": lambda: save_xt_spot_positions("portfolio.db", days_back=40),
-        "mexc": lambda: save_mexc_spot_positions(db_path="portfolio.db", days_back=40),
-    }
-
-    for exchange_name, sync_function in spot_sync_functions.items():
-        if should_sync(exchange_name):  # Mismo filtro que futures
-            print(f"⏳ Sincronizando SPOT TRADES de {exchange_name.capitalize()}.")
-            try:
-                sync_function()
-                print(
-                    f"✅ Trades de spot de {exchange_name.capitalize()} actualizados correctamente."
-                )
-            except Exception as e:
-                print(f"❌ Error en spot trades de {exchange_name}: {e}")
 
 
 # def main():
@@ -2431,6 +2998,8 @@ def force_load_closed_positions(
 api = Blueprint("api", __name__)
 
 
+# fin de la funcion para guardar automaticamente
+# =====================================================
 @app.post("/api/closed/load")
 def api_closed_load():
     """
@@ -2441,15 +3010,15 @@ def api_closed_load():
         payload = request.get_json(force=True) or {}
         exchange = (payload.get("exchange") or "").strip().lower()
         days = int(payload.get("days") or 30)
-        days = max(1, min(60, days))
+        days = max(1, min(90, days))
 
         if not exchange:
-            return jsonify({"error": "Falta 'exchange'"}), 400
+            return jsonify({"error": "exchange requerido"}), 400
 
         result = force_load_closed_positions(
             exchange=exchange, days=days, db_path=DB_PATH, debug=True
         )
-        # (Opcional) refrescar cache de abiertas para la UI, pero NO es requisito para el guardado:
+
         try:
             fetch_positions = POSITIONS_FUNCTIONS.get(exchange)
             if fetch_positions:
@@ -2463,16 +3032,92 @@ def api_closed_load():
         return jsonify({"error": str(e)}), 500
 
 
+@app.post("/api/funding/force")
+def api_funding_force():
+    """Force funding sync for the given exchanges and window (1-90 days)."""
+    try:
+        payload = request.get_json(force=True) or {}
+        raw_exchanges = payload.get("exchanges") or []
+        if isinstance(raw_exchanges, str):
+            raw_exchanges = [raw_exchanges]
+
+        normalized = []
+        for ex in raw_exchanges:
+            key = (ex or "").strip().lower()
+            if key and key in FUNDING_PULLERS:
+                normalized.append(key)
+
+        normalized = sorted(set(normalized))
+        if not normalized:
+            return jsonify({"ok": False, "error": "exchanges required"}), 400
+
+        days = int(payload.get("days") or 1)
+        days = max(1, min(90, days))
+
+        inserted = sync_all_funding(
+            exchanges=normalized, force_days=days, verbose=False
+        )
+        results = {}
+        if isinstance(inserted, dict):
+            for ex in normalized:
+                results[ex] = int(inserted.get(ex, 0) or 0)
+        else:
+            common = int(inserted or 0)
+            for ex in normalized:
+                results[ex] = common
+
+        return jsonify({"ok": True, "days": days, "results": results})
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+# =====================================================
+# DELETE CLOSED POSITIONS
+# =====================================================
+@app.delete("/api/closed/delete")
+def api_closed_delete():
+    """
+    Borra posiciones cerradas por ID.
+    Body: { "ids": [1, 2, 3, ...] }
+    """
+    try:
+        payload = request.get_json(force=True) or {}
+        ids = payload.get("ids", [])
+
+        if not ids or not isinstance(ids, list):
+            return jsonify({"error": "Se requiere una lista de IDs"}), 400
+
+        # Validar que todos sean enteros
+        ids = [int(i) for i in ids if str(i).isdigit()]
+
+        if not ids:
+            return jsonify({"error": "No se proporcionaron IDs válidos"}), 400
+
+        conn = sqlite3.connect("portfolio.db")
+        cur = conn.cursor()
+
+        # Borrar posiciones
+        placeholders = ",".join("?" * len(ids))
+        cur.execute(f"DELETE FROM closed_positions WHERE id IN ({placeholders})", ids)
+        deleted = cur.rowcount
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({"ok": True, "deleted": deleted, "ids": ids}), 200
+
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
 # fin de la funcion para guardar automaticamente
 # =====================================================
 @app.post("/api/closed/sync")
 def api_closed_sync():
     """
     Dispara la carga 'normal' (smart sync con caché) de posiciones cerradas.
-    Body (opcional):
       { "exchange": "bitget" }  -> solo ese exchange
       { "force_full_sync": true } -> fuerza full sync (ignora caché)
-    Si no se especifica 'exchange', itera por TODOS los exchanges de SYNC_FUNCTIONS.
     """
     try:
         payload = request.get_json(silent=True) or {}
@@ -2484,7 +3129,6 @@ def api_closed_sync():
         results = {}
         total_saved = 0
 
-        # Ejecuta smart sync por exchange
         for ex in targets:
             try:
                 saved = smart_sync_closed_positions(
@@ -2493,7 +3137,6 @@ def api_closed_sync():
                 results[ex] = {"inserted": int(saved)}
                 total_saved += int(saved)
 
-                # Refrescar caché de abiertas para la UI
                 try:
                     fetch_positions = POSITIONS_FUNCTIONS.get(ex)
                     if fetch_positions:
@@ -2502,10 +3145,9 @@ def api_closed_sync():
                 except Exception:
                     pass
 
-            except Exception as e:
-                results[ex] = {"error": str(e)}
+            except Exception as err:
+                results[ex] = {"error": str(err)}
 
-        # Respuesta homogénea
         return (
             jsonify(
                 {
@@ -2546,16 +3188,88 @@ def _parse_ts_seconds(x):
         return 0
 
 
+@app.route("/api/positions/update", methods=["POST"])
+def api_update_position():
+    """
+    Update/override position fields manually.
+
+    Request body:
+    {
+        "exchange": "backpack",
+        "symbol": "ENA",
+        "side": "long",
+        "size": 1000.0,
+        "entry_price": 0.5,
+        "liquidation_price": 0.5,
+        "fee": -10.5,
+        "funding_fee": 5.2,
+        "realized_pnl": -5.3,
+        "init_margin": 100.0,
+        "main_margin": 95.0
+    }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        exchange = (data.get("exchange") or "").strip()
+        symbol = (data.get("symbol") or "").strip()
+
+        if not exchange or not symbol:
+            return jsonify({"error": "exchange and symbol are required"}), 400
+
+        overrides = {}
+        fields = [
+            "side",
+            "size",
+            "entry_price",
+            "liquidation_price",
+            "fee",
+            "funding_fee",
+            "realized_pnl",
+            "init_margin",
+            "main_margin",
+        ]
+
+        for field in fields:
+            if field in data and data[field] is not None:
+                if field == "side":
+                    # Side is a string field
+                    overrides[field] = str(data[field]).lower()
+                else:
+                    # Numeric fields
+                    try:
+                        overrides[field] = float(data[field])
+                    except (ValueError, TypeError):
+                        return jsonify({"error": f"Invalid value for {field}"}), 400
+
+        save_position_override(exchange, symbol, overrides)
+
+        return jsonify(
+            {
+                "success": True,
+                "exchange": exchange,
+                "symbol": symbol,
+                "overrides": overrides,
+            }
+        )
+
+    except Exception as e:
+        print(f"❌ Error updating position: {e}")
+        import traceback
+
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/manual/closed", methods=["POST"])
 def api_manual_closed():
     """
     Inserta una posición cerrada manual.
     Campos mínimos: exchange, symbol, side, size, entry_price, close_price, close_time.
-    Opcionales: open_time, funding_total, fee_total, realized_pnl, initial_margin, notional, leverage, liquidation_price.
+    Opcionales: open_time, funding_total, fee_total, realized_pnl, initial_margin, notional, leverage, liquidation.
     """
     try:
         data = request.get_json(force=True) or {}
-        # Normalizar y sanear
         payload = {
             "exchange": (data.get("exchange") or "").strip().lower(),
             "symbol": (data.get("symbol") or "").strip().upper(),
@@ -2567,14 +3281,13 @@ def api_manual_closed():
             "close_time": int(_parse_ts_seconds(data.get("close_time") or 0)),
             "funding_total": float(data.get("funding_total") or 0),
             "fee_total": float(data.get("fee_total") or 0),
-            "realized_pnl": data.get("realized_pnl"),  # puede ser None → se compone
+            "realized_pnl": data.get("realized_pnl"),
             "initial_margin": data.get("initial_margin"),
             "notional": data.get("notional"),
             "leverage": data.get("leverage"),
             "liquidation_price": data.get("liquidation_price"),
         }
 
-        # Validación mínima
         req_fields = [
             "exchange",
             "symbol",
@@ -2584,16 +3297,14 @@ def api_manual_closed():
             "close_price",
             "close_time",
         ]
-        for f in req_fields:
-            if not payload.get(f) and payload.get(f) != 0:
-                return jsonify({"error": f"Campo requerido: {f}"}), 400
+        for field in req_fields:
+            if payload.get(field) in (None, ""):
+                return jsonify({"error": f"Campo requerido: {field}"}), 400
 
-        # Llama a la función estándar de guardado (se encarga de APR/ROI/etc.)
         from db_manager import save_closed_position
 
         save_closed_position(payload)
 
-        # Recupera el id insertado por combinación (exchange, symbol, close_time) más reciente
         import sqlite3
 
         conn = sqlite3.connect(DB_PATH)
@@ -2614,6 +3325,186 @@ def api_manual_closed():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+    # # -------------------------
+    # # Cost meter / usage estimator
+    # # -------------------------
+    # import os as _os
+    # import time as _time
+    # import json as _json
+    # try:
+    #     import resource as _resource
+    # except ImportError:
+    #     _resource = None  # Windows no tiene este módulo
+
+    # from datetime import datetime, timezone as _timezone
+    # try:
+    #     import psutil as _psutil
+    # except Exception:
+    #     _psutil = None
+
+    # # Flask helpers (assume `app` exists above in the file)
+    # from flask import request as _request, jsonify as _jsonify, g as _g
+
+    # # Enable/disable the meter via env var
+    # ENABLE_COST_METER = _os.getenv("ENABLE_COST_METER", "1") not in ("0", "false", "False")
+
+    # # Pricing model (defaults; override with env vars)
+    # # These are estimators — adjust to match Railway/VPS pricing/credits as you like.
+    # COST_PER_CPU_SEC_USD = float(_os.getenv("COST_PER_CPU_SEC_USD", 0.00005))    # USD per CPU-second
+    # COST_PER_MB_RAM_HOUR_USD = float(_os.getenv("COST_PER_MB_RAM_HOUR_USD", 0.00002))  # USD per MB-hour
+    # COST_PER_GB_EGRESS_USD = float(_os.getenv("COST_PER_GB_EGRESS_USD", 0.09))  # USD per GB out
+
+    # # File to persist daily totals (next to portfolio.py)
+    # _COST_PERSIST_FILE = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".cost_meter.json")
+
+    # def _now_date_key():
+    #     return datetime.now(_timezone.utc).strftime("%Y-%m-%d")
+
+    # def _load_cost_store():
+    #     try:
+    #         if _os.path.exists(_COST_PERSIST_FILE):
+    #             with open(_COST_PERSIST_FILE, "r") as f:
+    #                 return _json.load(f)
+    #     except Exception:
+    #         pass
+    #     return {}
+
+    # def _save_cost_store(store):
+    #     try:
+    #         with open(_COST_PERSIST_FILE, "w") as f:
+    #             _json.dump(store, f, indent=2)
+    #     except Exception:
+    #         pass
+
+    # _COST_STORE = _load_cost_store()
+
+    # def _snapshot_usage():
+    #     """Return a snapshot dict with wall time, cpu seconds and rss bytes."""
+    #     now = _time.time()
+    #     cpu = 0.0
+    #     mem = 0.0
+
+    #     # Intentar obtener CPU time
+    #     if _resource:
+    #         # Unix/Linux
+    #         try:
+    #             r = _resource.getrusage(_resource.RUSAGE_SELF)
+    #             cpu = float((r.ru_utime or 0.0) + (r.ru_stime or 0.0))
+    #         except Exception:
+    #             pass
+
+    #     # Obtener memoria (psutil funciona en Windows y Unix)
+    #     try:
+    #         if _psutil:
+    #             proc = _psutil.Process(_os.getpid())
+    #             cpu_times = proc.cpu_times()
+    #             cpu = cpu_times.user + cpu_times.system  # Fallback si no hay resource
+    #             mem = float(proc.memory_info().rss)
+    #     except Exception:
+    #         pass
+
+    #     return {"t": now, "cpu": cpu, "mem": mem}
+
+    # def _estimate_cost(delta, duration_sec):
+    #     """
+    #     delta: dict with keys cpu (sec), mem_avg_bytes, egress_bytes
+    #     duration_sec: wall time seconds
+    #     returns cost breakdown dict in USD
+    #     """
+    #     cpu_cost = float(delta.get("cpu", 0.0)) * COST_PER_CPU_SEC_USD
+    #     mem_mb = (float(delta.get("mem_avg_bytes", 0.0)) / 1024.0) / 1024.0
+    #     hours = max(duration_sec / 3600.0, 1e-9)
+    #     mem_cost = mem_mb * hours * COST_PER_MB_RAM_HOUR_USD
+    #     egress_gb = (float(delta.get("egress_bytes", 0)) or 0.0) / (1024.0 ** 3)
+    #     egress_cost = egress_gb * COST_PER_GB_EGRESS_USD
+    #     total = cpu_cost + mem_cost + egress_cost
+    #     return {"cpu_cost": cpu_cost, "mem_cost": mem_cost, "egress_cost": egress_cost, "total": total}
+
+    # # Flask hooks
+    # try:
+    #     @app.before_request
+    #     def _cost_meter_before():
+    #         if not ENABLE_COST_METER:
+    #             return
+    #         _g._cost_meter_start = _snapshot_usage()
+    #         _g._cost_meter_start_t = _time.time()
+
+    #     @app.after_request
+    #     def _cost_meter_after(response):
+    #         try:
+    #             if not ENABLE_COST_METER:
+    #                 return response
+    #             start = getattr(_g, "_cost_meter_start", None)
+    #             start_t = getattr(_g, "_cost_meter_start_t", None)
+    #             end = _snapshot_usage()
+    #             end_t = _time.time()
+    #             if not start or not start_t:
+    #                 return response
+
+    #             duration = max(end_t - start_t, 0.0)
+    #             cpu_delta = max(0.0, (end.get("cpu", 0.0) - start.get("cpu", 0.0)))
+    #             mem_avg = max(0.0, ((end.get("mem", 0.0) + start.get("mem", 0.0)) / 2.0))
+
+    #             # Estimate egress as response body length (bytes)
+    #             try:
+    #                 body = response.get_data()
+    #                 egress = len(body) if body is not None else 0
+    #             except Exception:
+    #                 egress = 0
+
+    #             delta = {"cpu": cpu_delta, "mem_avg_bytes": mem_avg, "egress_bytes": egress}
+    #             cost_breakdown = _estimate_cost(delta, duration)
+
+    #             # Persist into daily store
+    #             key = _now_date_key()
+    #             day = _COST_STORE.get(key, {"requests": 0, "cpu_sec": 0.0, "mem_mb_hours": 0.0, "egress_bytes": 0, "usd": 0.0})
+
+    #             day["requests"] = int(day.get("requests", 0)) + 1
+    #             day["cpu_sec"] = float(day.get("cpu_sec", 0.0)) + cpu_delta
+    #             mem_mb = mem_avg / (1024.0 * 1024.0)
+    #             day["mem_mb_hours"] = float(day.get("mem_mb_hours", 0.0)) + (mem_mb * max(duration / 3600.0, 0.0))
+    #             day["egress_bytes"] = int(day.get("egress_bytes", 0)) + int(egress)
+    #             day["usd"] = float(day.get("usd", 0.0)) + float(cost_breakdown.get("total", 0.0))
+    #             _COST_STORE[key] = day
+    #             _save_cost_store(_COST_STORE)
+
+    #             # Console print
+    #             route = _request.path if _request else "?"
+    #             method = _request.method if _request else "?"
+    #             print(
+    #                 f"💸 COST-METER {method} {route} | dur={duration:.3f}s cpu={cpu_delta:.4f}s mem_avg={mem_mb:.2f}MB egress={egress}B -> ${cost_breakdown['total']:.6f} (cpu=${cost_breakdown['cpu_cost']:.6f} mem=${cost_breakdown['mem_cost']:.6f} egress=${cost_breakdown['egress_cost']:.6f})"
+    #             )
+
+    #             # Print a short daily summary every 10 requests
+    #             if _COST_STORE[key]["requests"] % 10 == 0:
+    #                 print(
+    #                     f"📆 Daily total {key}: requests={_COST_STORE[key]['requests']} cpu_s={_COST_STORE[key]['cpu_sec']:.3f} mem_mb_h={_COST_STORE[key]['mem_mb_hours']:.3f} egress_MB={_COST_STORE[key]['egress_bytes']/(1024.0*1024.0):.3f} usd=${_COST_STORE[key]['usd']:.6f}"
+    #                 )
+    #         except Exception as e:
+    #             # Never break the response; just debug print
+    #             print(f"⚠️ cost-meter error: {e}")
+    #         return response
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+#     print("✅ resource disponible (Unix/Linux)")
+# except ImportError:
+#     print("⚠️ resource NO disponible (Windows) - NORMAL")
+
+# try:
+#     import psutil
+#     print("✅ psutil disponible")
+# except ImportError:
+#     print("❌ psutil NO disponible - instalar con: pip install psutil")
+
+# # Test 2: Probar la función _snapshot_usage()
+# # (Copia y pega la función corregida primero, luego:)
+# snapshot = _snapshot_usage()
+# print(f"📊 Snapshot: CPU={snapshot['cpu']:.4f}s, MEM={snapshot['mem']/1024/1024:.2f}MB")
+
+
+# ===========Costmeter final
 
 if __name__ == "__main__":
     print("🧱 Inicializando base de datos...")
@@ -2624,6 +3515,10 @@ if __name__ == "__main__":
     from db_manager import migrate_spot_support
 
     migrate_spot_support()
+
+    # Cargar overrides de posiciones desde la base de datos
+    print("📥 Cargando position overrides desde base de datos...")
+    load_position_overrides_into_memory()
 
     # ✅ NUEVO: Inicializar tabla de sync timestamps
     from universal_cache import init_sync_timestamps_table
@@ -2643,7 +3538,8 @@ if __name__ == "__main__":
             + (f" (forzado {force} días)" if force else " (incremental)")
         )
 
-        sync_all_funding(force_days=force, verbose=True)
+        preferred = _preferred_position_exchanges()
+        sync_all_funding(exchanges=preferred, force_days=force, verbose=True)
 
     print("✅ Base de datos lista. Ejecutando sincronización inicial...")
     main()

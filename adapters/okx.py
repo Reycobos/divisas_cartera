@@ -39,6 +39,7 @@ import argparse
 from typing import Any, Dict, List, Optional, Tuple, Iterable
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import requests
@@ -67,8 +68,13 @@ OKX_API_SECRET = os.getenv("OKX_API_SECRET", "")
 OKX_API_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE", "")
 
 # ============== Helpers de impresión ==============
+OKX_VERBOSE_LOGS = os.getenv("OKX_VERBOSE_LOGS", "0") == "1"
+
+
 def _log(msg: str) -> None:
-    print(msg)
+    if OKX_VERBOSE_LOGS:
+        print(msg)
+
 
 # =========================
 #  Normalización de símbolo
@@ -77,11 +83,12 @@ def normalize_symbol(sym: str) -> str:
     if not sym:
         return ""
     s = sym.upper()
-    s = re.sub(r'^PERP_', '', s)
-    s = re.sub(r'(_|-)?(USDT|USDC|PERP)$', '', s)
-    s = re.sub(r'[_-]+$', '', s)
-    s = re.split(r'[_-]', s)[0]
+    s = re.sub(r"^PERP_", "", s)
+    s = re.sub(r"(_|-)?(USDT|USDC|PERP)$", "", s)
+    s = re.sub(r"[_-]+$", "", s)
+    s = re.split(r"[_-]", s)[0]
     return s
+
 
 # =========================
 #     Firmas / Requests
@@ -91,17 +98,27 @@ def _iso_ts() -> str:
     now = datetime.now(timezone.utc)
     return now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+
 def _require_keys():
     if not (OKX_API_KEY and OKX_API_SECRET and OKX_API_PASSPHRASE):
         raise RuntimeError("Faltan OKX_API_KEY / OKX_API_SECRET / OKX_API_PASSPHRASE.")
+
 
 def _sign_okx(ts: str, method: str, request_path: str, body: str) -> str:
     prehash = f"{ts}{method.upper()}{request_path}{body}"
     mac = hmac.new(OKX_API_SECRET.encode(), prehash.encode(), hashlib.sha256).digest()
     return base64.b64encode(mac).decode()
 
-def _okx_request(method: str, path: str, params: Optional[Dict[str, Any]] = None,
-                 body: Optional[Dict[str, Any]] = None, timeout=20, retries=3, backoff=0.6) -> Any:
+
+def _okx_request(
+    method: str,
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    body: Optional[Dict[str, Any]] = None,
+    timeout=20,
+    retries=3,
+    backoff=0.6,
+) -> Any:
     """
     Hace request firmado a OKX. Para GET, los query params cuentan dentro del path.
     Retrys con backoff simple en 429/5xx.
@@ -112,10 +129,15 @@ def _okx_request(method: str, path: str, params: Optional[Dict[str, Any]] = None
     if method.upper() == "GET" and params:
         # Los params van en el path para la firma
         from urllib.parse import urlencode
+
         q = "?" + urlencode(params, doseq=True)
         url = url + q
 
-    body_str = "" if body is None else json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    body_str = (
+        ""
+        if body is None
+        else json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+    )
 
     for attempt in range(1, retries + 1):
         ts = _iso_ts()
@@ -129,7 +151,9 @@ def _okx_request(method: str, path: str, params: Optional[Dict[str, Any]] = None
         }
         try:
             resp = requests.request(
-                method.upper(), url, headers=headers,
+                method.upper(),
+                url,
+                headers=headers,
                 data=(None if body is None else body_str),
                 timeout=timeout,
             )
@@ -157,7 +181,9 @@ def _okx_request(method: str, path: str, params: Optional[Dict[str, Any]] = None
 
     return []
 
+
 # ============== utils numéricos ==============
+
 
 def _f(x: Any, default: float = 0.0) -> float:
     try:
@@ -165,25 +191,34 @@ def _f(x: Any, default: float = 0.0) -> float:
     except Exception:
         return default
 
+
 def _i_ms(ms: Any, default: Optional[int] = None) -> Optional[int]:
     try:
         return int(int(float(ms)) / 1000)
     except Exception:
         return default
 
+
 # =========================
 #      Open Positions
 # =========================
 
-def _build_latest_history_map(inst_type: str = "SWAP", limit: int = 200) -> Dict[str, Dict[str, Any]]:
+
+def _build_latest_history_map(
+    inst_type: str = "SWAP", limit: int = 200
+) -> Dict[str, Dict[str, Any]]:
     """
     Devuelve un mapa posId -> última fila de /account/positions-history
     (por uTime), para cruzar parciales (openMaxPos, closeTotalPos).
     """
-    rows = _okx_request("GET", "/api/v5/account/positions-history", params={
-        "instType": inst_type,
-        "limit": str(max(1, min(int(limit), 100)))
-    }) or []
+    rows = (
+        _okx_request(
+            "GET",
+            "/api/v5/account/positions-history",
+            params={"instType": inst_type, "limit": str(max(1, min(int(limit), 100)))},
+        )
+        or []
+    )
     latest: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         pid = str(r.get("posId") or "").strip()
@@ -250,14 +285,20 @@ def fetch_okx_open_positions(inst_type: str = "SWAP") -> List[Dict[str, Any]]:
             size_base = pos_contracts
 
         # notional (USD)
-        notional = notional_usd or (abs(size_base * mark) if mark > 0 else abs(size_base * entry))
+        notional = notional_usd or (
+            abs(size_base * mark) if mark > 0 else abs(size_base * entry)
+        )
 
         # PnL no realizado directo de OKX
         unreal = _f(r.get("upl") or r.get("uplLastPx"))
         if unreal == 0.0 and entry and mark and size_base:
-            unreal = (entry - mark) * size_base if side == "short" else (mark - entry) * size_base
+            unreal = (
+                (entry - mark) * size_base
+                if side == "short"
+                else (mark - entry) * size_base
+            )
 
-        fee_acc = _f(r.get("fee") or 0.0)           # acumulado (negativo costo)
+        fee_acc = _f(r.get("fee") or 0.0)  # acumulado (negativo costo)
         funding_acc = _f(r.get("fundingFee") or 0.0)
         realized_open = fee_acc + funding_acc
 
@@ -269,7 +310,11 @@ def fetch_okx_open_positions(inst_type: str = "SWAP") -> List[Dict[str, Any]]:
 
         contracts_now = pos_contracts
         # Mejor estimación del contrato inicial del ciclo
-        contracts_initial = contracts_max if contracts_max > 0 else (contracts_now + contracts_closed if contracts_closed > 0 else 0.0)
+        contracts_initial = (
+            contracts_max
+            if contracts_max > 0
+            else (contracts_now + contracts_closed if contracts_closed > 0 else 0.0)
+        )
         # Convertir a unidades base
         if contracts_initial > 0:
             if ctval > 0:
@@ -277,38 +322,54 @@ def fetch_okx_open_positions(inst_type: str = "SWAP") -> List[Dict[str, Any]]:
                 closed_base = max(0.0, initial_base - size_base)
             else:
                 # usa proporción respecto al tamaño actual (contratos -> base)
-                initial_base = size_base * (contracts_initial / contracts_now) if contracts_now > 0 else None
-                closed_base = (initial_base - size_base) if (initial_base is not None) else None
+                initial_base = (
+                    size_base * (contracts_initial / contracts_now)
+                    if contracts_now > 0
+                    else None
+                )
+                closed_base = (
+                    (initial_base - size_base) if (initial_base is not None) else None
+                )
         else:
             initial_base = None
             closed_base = None
 
-        out.append({
-            "exchange": "okx",
-            "symbol": sym,
-            "side": side,
-            "size": float(size_base),
-            "margin": margin,
-            "entry_price": entry,
-            "mark_price": mark,
-            "liquidation_price": liq or 0.0,
-            "notional": float(notional),
-            "unrealized_pnl": float(unreal),
-            "fee": float(fee_acc),
-            "funding_fee": float(funding_acc),
-            "realized_pnl": float(realized_open),
-            "closed_size": (float(closed_base) if closed_base is not None else None),
-            "initial_size": (float(initial_base) if initial_base is not None else None),
-        })
+        out.append(
+            {
+                "exchange": "okx",
+                "symbol": sym,
+                "side": side,
+                "size": float(size_base),
+                "margin": margin,
+                "entry_price": entry,
+                "mark_price": mark,
+                "liquidation_price": liq or 0.0,
+                "notional": float(notional),
+                "unrealized_pnl": float(unreal),
+                "fee": float(fee_acc),
+                "funding_fee": float(funding_acc),
+                "realized_pnl": float(realized_open),
+                "closed_size": (
+                    float(closed_base) if closed_base is not None else None
+                ),
+                "initial_size": (
+                    float(initial_base) if initial_base is not None else None
+                ),
+            }
+        )
 
     _log(f"✅ OKX abiertas normalizadas: {len(out)}")
     return out
+
 
 # =========================
 #    Funding (account)
 # =========================
 
-def fetch_okx_funding_fees(limit: int = 50, before: Optional[str] = None, after: Optional[str] = None) -> List[Dict[str, Any]]:
+
+def fetch_okx_funding_fees(
+    limit: int = 50, before: Optional[str] = None, after: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """
     GET /api/v5/account/bills?type=8
       - type=8 => Funding fee
@@ -324,8 +385,10 @@ def fetch_okx_funding_fees(limit: int = 50, before: Optional[str] = None, after:
     }
     """
     params = {"type": "8", "limit": str(max(1, min(int(limit), 100)))}
-    if before: params["before"] = before
-    if after:  params["after"] = after
+    if before:
+        params["before"] = before
+    if after:
+        params["after"] = after
 
     rows = _okx_request("GET", "/api/v5/account/bills", params=params) or []
     out: List[Dict[str, Any]] = []
@@ -338,25 +401,31 @@ def fetch_okx_funding_fees(limit: int = 50, before: Optional[str] = None, after:
         ts_ms = int(r.get("ts")) if r.get("ts") else None
         sym = normalize_symbol(inst_id) if inst_id else ""
         # En bills, 'balChg' es el cambio neto de balance. Fallbacks seguros.
-        income = _f(r.get("balChg") if r.get("balChg") not in ("", None)
-                    else r.get("amt") if r.get("amt") not in ("", None)
-                    else r.get("pnl"))
+        income = _f(
+            r.get("balChg")
+            if r.get("balChg") not in ("", None)
+            else r.get("amt") if r.get("amt") not in ("", None) else r.get("pnl")
+        )
 
-        out.append({
-            "exchange": "okx",
-            "symbol": sym,
-            "income": income,          # + cobro / - pago
-            "asset": ccy,
-            "timestamp": int(ts_ms) if ts_ms else None,
-            "funding_rate": 0.0,
-            "type": "FUNDING_FEE",
-        })
+        out.append(
+            {
+                "exchange": "okx",
+                "symbol": sym,
+                "income": income,  # + cobro / - pago
+                "asset": ccy,
+                "timestamp": int(ts_ms) if ts_ms else None,
+                "funding_rate": 0.0,
+                "type": "FUNDING_FEE",
+            }
+        )
 
     return out
+
 
 # =========================
 #        Balances
 # =========================
+
 
 def fetch_okx_all_balances(db_path: str = "portfolio.db") -> Dict[str, Any]:
     """
@@ -405,13 +474,18 @@ def fetch_okx_all_balances(db_path: str = "portfolio.db") -> Dict[str, Any]:
     _log(f"💼 OKX equity total: {equity:.2f}")
     return result
 
+
 # =========================
 #     Closed Positions
 # =========================
 
 # Mapa de tipos OKX relevantes
-_CLOSE_ALL_TYPES = {"2", "3"}      # 2: close all, 3: liquidation
-_PARTIAL_TYPES   = {"1", "4", "5"}  # 1: partial close, 4: partial liquidation, 5: ADL not fully closed
+_CLOSE_ALL_TYPES = {"2", "3"}  # 2: close all, 3: liquidation
+_PARTIAL_TYPES = {
+    "1",
+    "4",
+    "5",
+}  # 1: partial close, 4: partial liquidation, 5: ADL not fully closed
 
 
 def _normalize_closed_from_history(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -438,8 +512,7 @@ def _normalize_closed_from_history(row: Dict[str, Any]) -> Optional[Dict[str, An
             else:
                 # Último recurso: si el PnL es positivo probablemente era long, si es negativo short
                 realized_pnl = _f(row.get("realizedPnl"))
-                side = "long" if realized_pnl >= 0 else "short"        
-
+                side = "long" if realized_pnl >= 0 else "short"
 
         # tamaños/precios
         size = abs(_f(row.get("closeTotalPos") or row.get("openMaxPos")))
@@ -483,7 +556,9 @@ def _normalize_closed_from_history(row: Dict[str, Any]) -> Optional[Dict[str, An
         return None
 
 
-def _fetch_positions_history(inst_type: str = "SWAP", limit: int = 100) -> List[Dict[str, Any]]:
+def _fetch_positions_history(
+    inst_type: str = "SWAP", limit: int = 100
+) -> List[Dict[str, Any]]:
     params = {"instType": inst_type, "limit": str(max(1, min(int(limit), 100)))}
     rows = _okx_request("GET", "/api/v5/account/positions-history", params=params) or []
     _log(f"🔍 DEBUG OKX: {len(rows)} filas de positions-history")
@@ -504,7 +579,9 @@ def _split_history_by_type(rows: Iterable[Dict[str, Any]]):
     return allowed, partial, ignored
 
 
-def purge_okx_partial_closes(db_path: str = "portfolio.db", inst_type: str = "SWAP", limit: int = 100) -> int:
+def purge_okx_partial_closes(
+    db_path: str = "portfolio.db", inst_type: str = "SWAP", limit: int = 100
+) -> int:
     """
     Elimina de SQLite cualquier fila que corresponda a cierres **parciales** de OKX
     (types {1,4,5}) previamente guardados en 'closed_positions'.
@@ -541,7 +618,9 @@ def purge_okx_partial_closes(db_path: str = "portfolio.db", inst_type: str = "SW
     return removed
 
 
-def fetch_okx_closed_positions(inst_type: str = "SWAP", limit: int = 100) -> List[Dict[str, Any]]:
+def fetch_okx_closed_positions(
+    inst_type: str = "SWAP", limit: int = 100
+) -> List[Dict[str, Any]]:
     """
     GET /api/v5/account/positions-history
     Retorna filas normalizadas aptas para DB **FILTRADAS** a cierres completos:
@@ -559,9 +638,14 @@ def fetch_okx_closed_positions(inst_type: str = "SWAP", limit: int = 100) -> Lis
     return out
 
 
-def save_okx_closed_positions(db_path: str = "portfolio.db", days: int = 30, debug: bool = False,
-                              inst_type: str = "SWAP", limit: int = 100,
-                              cleanup_partials: bool = True) -> int:
+def save_okx_closed_positions(
+    db_path: str = "portfolio.db",
+    days: int = 30,
+    debug: bool = False,
+    inst_type: str = "SWAP",
+    limit: int = 100,
+    cleanup_partials: bool = True,
+) -> int:
     """
     Guarda en SQLite **solo** cierres completos de OKX.
     - Filtra por type in {2: close all, 3: liquidation}.
@@ -601,27 +685,33 @@ def save_okx_closed_positions(db_path: str = "portfolio.db", days: int = 30, deb
                 continue
 
             # save_closed_position aplica reglas: fee_total negativa, pnl_percent, apr, etc.
-            save_closed_position({
-                "exchange": pos["exchange"],
-                "symbol": pos["symbol"],
-                "side": pos["side"],
-                "size": pos["size"],
-                "entry_price": pos["entry_price"],
-                "close_price": pos["close_price"],
-                "open_time": pos["open_time"],
-                "close_time": pos["close_time"],
-                "realized_pnl": pos["realized_pnl"],
-                "funding_total": pos.get("funding_total", 0.0),
-                "fee_total": pos.get("fee_total", 0.0),
-                "pnl": pos.get("pnl", 0.0),
-                "notional": pos.get("notional", 0.0),
-                "leverage": pos.get("leverage"),
-                "initial_margin": pos.get("initial_margin"),
-                "liquidation_price": pos.get("liquidation_price"),
-            })
+            save_closed_position(
+                {
+                    "exchange": pos["exchange"],
+                    "symbol": pos["symbol"],
+                    "side": pos["side"],
+                    "size": pos["size"],
+                    "entry_price": pos["entry_price"],
+                    "close_price": pos["close_price"],
+                    "open_time": pos["open_time"],
+                    "close_time": pos["close_time"],
+                    "realized_pnl": pos["realized_pnl"],
+                    "funding_total": pos.get("funding_total", 0.0),
+                    "fee_total": pos.get("fee_total", 0.0),
+                    "pnl": pos.get("pnl", 0.0),
+                    "notional": pos.get("notional", 0.0),
+                    "leverage": pos.get("leverage"),
+                    "initial_margin": pos.get("initial_margin"),
+                    "liquidation_price": pos.get("liquidation_price"),
+                }
+            )
             saved += 1
             if debug:
-                price_pnl = pos.get("realized_pnl", 0.0) - pos.get("funding_total", 0.0) - pos.get("fee_total", 0.0)
+                price_pnl = (
+                    pos.get("realized_pnl", 0.0)
+                    - pos.get("funding_total", 0.0)
+                    - pos.get("fee_total", 0.0)
+                )
                 _log(f"   💾 OKX saved {pos['symbol']} | price_pnl≈{price_pnl:.6f}")
         except Exception as e:
             _log(f"⚠️ Error guardando {pos.get('symbol')}: {e}")
@@ -630,19 +720,32 @@ def save_okx_closed_positions(db_path: str = "portfolio.db", days: int = 30, deb
     _log(f"✅ OKX guardadas: {saved} | omitidas (duplicadas): {skipped}")
     return saved
 
+
 # =========================
 #         Debug
 # =========================
 
-def debug_preview_okx_closed(days: int = 3, symbol: Optional[str] = None, inst_type: str = "SWAP", limit: int = 100) -> None:
+
+def debug_preview_okx_closed(
+    days: int = 3,
+    symbol: Optional[str] = None,
+    inst_type: str = "SWAP",
+    limit: int = 100,
+) -> None:
     rows = _fetch_positions_history(inst_type=inst_type, limit=limit)
     allowed, partial, ignored = _split_history_by_type(rows)
-    _log(f"📦 DEBUG: total={len(rows)} | completas={len(allowed)} | parciales={len(partial)} | otras={len(ignored)}")
+    _log(
+        f"📦 DEBUG: total={len(rows)} | completas={len(allowed)} | parciales={len(partial)} | otras={len(ignored)}"
+    )
     for r in allowed[:50]:
         if symbol and normalize_symbol(r.get("instId", "")) != normalize_symbol(symbol):
             continue
         mapped = _normalize_closed_from_history(r) or {}
-        price_pnl = (mapped.get("realized_pnl") or 0.0) - (mapped.get("funding_total") or 0.0) - (mapped.get("fee_total") or 0.0)
+        price_pnl = (
+            (mapped.get("realized_pnl") or 0.0)
+            - (mapped.get("funding_total") or 0.0)
+            - (mapped.get("fee_total") or 0.0)
+        )
         _log(
             f"🔎 {mapped.get('symbol')} type={r.get('type')} side={mapped.get('side')} size={mapped.get('size')} "
             f"entry={mapped.get('entry_price')} close={mapped.get('close_price')} "
@@ -660,17 +763,28 @@ def debug_dump_okx_funding(limit: int = 50) -> List[Dict[str, Any]]:
     params = {"type": "8", "limit": str(limit)}
     return _okx_request("GET", "/api/v5/account/bills", params=params)
 
+
 # =========================
 #          CLI
 # =========================
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="OKX adapter debug/CLI")
-    parser.add_argument("--dry-run", action="store_true", default=True, help="Solo imprimir (default).")
-    parser.add_argument("--save-closed", action="store_true", help="Guardar cerradas en portfolio.db")
+    parser.add_argument(
+        "--dry-run", action="store_true", default=True, help="Solo imprimir (default)."
+    )
+    parser.add_argument(
+        "--save-closed", action="store_true", help="Guardar cerradas en portfolio.db"
+    )
     parser.add_argument("--days", type=int, default=30)
-    parser.add_argument("--funding", type=int, default=0, help="Mostrar N registros de funding")
-    parser.add_argument("--opens", action="store_true", help="Mostrar abiertas normalizadas y RAW")
-    parser.add_argument("--limit", type=int, default=100, help="Límite de history (máx. 100)")
+    parser.add_argument(
+        "--funding", type=int, default=0, help="Mostrar N registros de funding"
+    )
+    parser.add_argument(
+        "--opens", action="store_true", help="Mostrar abiertas normalizadas y RAW"
+    )
+    parser.add_argument(
+        "--limit", type=int, default=100, help="Límite de history (máx. 100)"
+    )
     args = parser.parse_args()
 
     if args.opens:
@@ -690,5 +804,10 @@ if __name__ == "__main__":
 
     if args.save_closed:
         _log("🧹 Limpiando parciales y guardando cierres completos en DB...")
-        save_okx_closed_positions("portfolio.db", days=args.days, debug=True, limit=args.limit, cleanup_partials=True)
-
+        save_okx_closed_positions(
+            "portfolio.db",
+            days=args.days,
+            debug=True,
+            limit=args.limit,
+            cleanup_partials=True,
+        )

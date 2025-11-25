@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -12,14 +13,36 @@
         background-color: #0d1117;
         color: #c9d1d9;
         font-family: "Inter", sans-serif;
+        margin: 0;
+        padding: 0;
+        line-height: 1;
+      }
+      .container-fluid {
+        padding-left: 8px !important;
+        padding-right: 8px !important;
+      }
+      .container {
+        margin-left: 10px !important;
+        margin-right: auto;
       }
       h1,
       h4 {
         color: #f0f6fc;
         font-weight: 600;
+        margin-top: 8px;
+        margin-bottom: 8px;
+      }
+      h1 {
+        font-size: 1.5rem;
+        padding: 8px 0;
+      }
+      .nav-tabs {
+        margin-bottom: 10px;
       }
       .nav-tabs .nav-link {
         color: #8b949e;
+        padding: 0.4rem 0.8rem;
+        font-size: 0.9rem;
       }
       .nav-tabs .nav-link.active {
         background-color: #161b22;
@@ -28,8 +51,9 @@
       .card {
         background-color: #161b22;
         border: 1px solid #30363d;
-        border-radius: 12px;
-        margin-bottom: 20px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        padding: 8px;
       }
       .table {
         color: #c9d1d9;
@@ -40,6 +64,7 @@
         --bs-table-hover-color: #c9d1d9;
         border-color: #30363d;
         font-size: 0.85rem;
+        margin-bottom: 0.2rem !important;
       }
       .table > :not(caption) > * > * {
         background-color: #1e1e2d !important;
@@ -142,6 +167,30 @@
         text-align: left;
       }
 
+      .force-select-grid,
+      .funding-select-grid {
+        max-height: 220px;
+        overflow-y: auto;
+        background-color: #111625;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .force-select-grid .form-check,
+      .funding-select-grid .form-check {
+        flex: 0 0 48%;
+        margin-bottom: 4px;
+      }
+      @media (max-width: 768px) {
+        .force-select-grid .form-check,
+        .funding-select-grid .form-check {
+          flex: 0 0 100%;
+        }
+      }
+
       /* Estilos para otros componentes (manteniendo los existentes) */
       .card-exchange {
         background: #2b2f3a;
@@ -168,16 +217,16 @@
       .strategy-card {
         background-color: #161b22;
         border: 1px solid #30363d;
-        border-radius: 12px;
-        padding: 15px;
-        margin-bottom: 20px;
+        border-radius: 8px;
+        padding: 0;
+        margin-bottom: 1px;
       }
       .strategy-header {
         background: linear-gradient(90deg, #1e3a8a, #2563eb);
         color: white;
-        padding: 10px;
-        border-radius: 8px;
-        margin-bottom: 10px;
+        padding: 0.2px 12px;
+        border-radius: 8px 8px 0 0;
+        margin-bottom: 0;
       }
       .badge-long {
         background-color: #16a34a;
@@ -188,24 +237,24 @@
       .summary-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 15px;
-        margin-top: 15px;
+        gap: 8px;
+        margin-top: 8px;
         text-align: center;
       }
       .summary-item {
         background-color: #0d1117;
         border: 1px solid #30363d;
-        border-radius: 8px;
-        padding: 10px;
+        border-radius: 6px;
+        padding: 2px 6px;
       }
       .summary-item h6 {
         margin: 0;
-        font-size: 0.9rem;
+        font-size: 0.75rem;
         color: #8b949e;
       }
       .summary-item p {
         margin: 0;
-        font-size: 1.1rem;
+        font-size: 0.95rem;
         font-weight: bold;
       }
       .risk-pill {
@@ -264,11 +313,23 @@
         text-align: center;
         font-weight: 600;
       }
+      .closed-position-table th:first-child,
+      .closed-position-table td:first-child {
+        width: 30px;
+        padding: 6px 4px;
+      }
       .closed-position-table td {
         padding: 6px 8px;
         text-align: center;
         border-bottom: 1px solid #30363d;
         color: #e8e8e8 !important;
+      }
+      .closed-pos-checkbox,
+      .select-all-card {
+        width: 16px;
+        height: 16px;
+        cursor: pointer;
+        accent-color: #dc3545;
       }
       .closed-position-footer {
         display: flex;
@@ -285,7 +346,7 @@
         display: flex;
         gap: 20px;
       }
-      
+
       .footer-item {
         text-align: center;
       }
@@ -550,84 +611,106 @@
       /* Nuevas casillas para seleccionar exchange*/
       .open-positions-layout {
         display: grid;
-        grid-template-columns: 180px 1fr;
-        gap: 12px;
+        grid-template-columns: 120px 1fr;
+        gap: 8px;
       }
 
       .exchange-filter-section {
         background-color: #161b22;
         border: 1px solid #30363d;
-        padding: 0.75rem;
+        padding: 0.5rem;
         border-radius: 6px;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem;
+        max-width: 120px;
       }
 
-    .exchange-checkboxes {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 0.35rem;
-    }
+      .exchange-checkboxes {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 0.15rem;
+      }
 
-    .form-check-label {
-      margin-left: 0.25rem;
-      cursor: pointer;
-    }
+      .form-check {
+        padding-left: 1.2rem;
+        margin-bottom: 0.1rem;
+      }
 
-    .form-check-input:checked {
-      background-color: var(--accent-color);
-      border-color: var(--accent-color);
-    }
+      .form-check-label {
+        margin-left: 0.15rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+      }
 
-    .spread-positive {
-      color: #22c55e;
-    }
+      .form-check-input:checked {
+        background-color: var(--accent-color);
+        border-color: var(--accent-color);
+      }
 
-    .spread-negative {
-      color: #ef4444;
-    }
+      .spread-positive {
+        color: #22c55e;
+      }
 
-    .header-spread-grid {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-top: 0.75rem;
-    }
+      .spread-negative {
+        color: #ef4444;
+      }
 
-    .spread-box {
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 8px;
-      padding: 6px 12px;
-      min-width: 120px;
-    }
+      .header-spread-grid {
+        display: flex;
+        gap: 16px;
+        flex-wrap: nowrap;
+        margin-top: 0;
+        align-items: center;
+      }
 
-    .spread-label {
-      font-size: 0.7rem;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      color: #c9d1d9;
-    }
+      .spread-box {
+        background: none;
+        border-radius: 0;
+        padding: 0;
+        min-width: 70px;
+        text-align: center;
+      }
 
-    .spread-value {
-      font-size: 1rem;
-      font-weight: 600;
-    }
+      .spread-label {
+        font-size: 0.65rem;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.6);
+        margin-bottom: 2px;
+      }
 
-    .funding-mini-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-size: 0.75rem;
-    }
+      .spread-value {
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
 
-    .funding-pill {
-      border-radius: 4px;
-      padding: 2px 6px;
-      background: #0d1117;
-      border: 1px solid #30363d;
-      display: inline-block;
-      text-align: center;
-    }
+      .funding-mini-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.75rem;
+      }
 
+      .funding-pill {
+        border-radius: 4px;
+        padding: 2px 6px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        display: inline-block;
+        text-align: center;
+      }
+
+      .badge {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.7rem;
+        font-weight: 600;
+      }
+
+      .vr {
+        width: 1px;
+        background-color: currentColor;
+        opacity: 0.3;
+        align-self: stretch;
+      }
     </style>
   </head>
 
@@ -699,7 +782,6 @@
         </li>
       </ul>
 
-
       <div class="tab-content mt-3" id="portfolioTabsContent">
         <!-- BALANCES -->
         <div class="tab-pane fade show active" id="balances" role="tabpanel">
@@ -712,7 +794,9 @@
             <!-- Left column: exchange filters -->
             <div class="exchange-filter-section">
               <div class="mb-2">
-                <button id="refreshOpen" class="refresh-btn w-100">🔄 Refresh</button>
+                <button id="refreshOpen" class="refresh-btn w-100">
+                  🔄 Refresh
+                </button>
               </div>
               <label class="form-label mb-2"><strong>Exchanges:</strong></label>
               <div class="exchange-checkboxes">
@@ -723,211 +807,242 @@
                     id="check-all-exchanges"
                     checked
                   />
-                  <label class="form-check-label" for="check-all-exchanges">All</label>
+                  <label class="form-check-label" for="check-all-exchanges"
+                    >All</label
+                  >
                 </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="aden"
-                  id="check-aden"
-                  checked
-                />
-                <label class="form-check-label" for="check-aden">Aden</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="aster"
-                  id="check-aster"
-                  checked
-                />
-                <label class="form-check-label" for="check-aster">Aster</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="backpack"
-                  id="check-backpack"
-                  checked
-                />
-                <label class="form-check-label" for="check-backpack"
-                  >Backpack</label
-                >
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="binance"
-                  id="check-binance"
-                  checked
-                />
-                <label class="form-check-label" for="check-binance"
-                  >Binance</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="bingx"
-                  id="check-bingx"
-                  checked
-                />
-                <label class="form-check-label" for="check-bingx">BingX</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="bitget"
-                  id="check-bitget"
-                  checked
-                />
-                <label class="form-check-label" for="check-bitget"
-                  >Bitget</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="bitrue"
-                  id="check-bitrue"
-                  checked
-                />
-                <label class="form-check-label" for="check-bitrue"
-                  >Bitrue</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="bybit"
-                  id="check-bybit"
-                  checked
-                />
-                <label class="form-check-label" for="check-bybit">Bybit</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="extended"
-                  id="check-extended"
-                  checked
-                />
-                <label class="form-check-label" for="check-extended"
-                  >Extended</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="gate"
-                  id="check-gate"
-                  checked
-                />
-                <label class="form-check-label" for="check-gate"
-                  >Gate.io</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="hyperliquid"
-                  id="check-hyperliquid"
-                  checked
-                />
-                <label class="form-check-label" for="check-hyperliquid"
-                  >Hyperliquid</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="kraken"
-                  id="check-kraken"
-                  checked
-                />
-                <label class="form-check-label" for="check-kraken"
-                  >Kraken</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="kucoin"
-                  id="check-kucoin"
-                  checked
-                />
-                <label class="form-check-label" for="check-kucoin"
-                  >KuCoin</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="lbank"
-                  id="check-lbank"
-                  checked
-                />
-                <label class="form-check-label" for="check-lbank"
-                  >Lbank</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="mexc"
-                  id="check-mexc"
-                  checked
-                />
-                <label class="form-check-label" for="check-mexc">MEXC</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="okx"
-                  id="check-okx"
-                  checked
-                />
-                <label class="form-check-label" for="check-okx">OKX</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="paradex"
-                  id="check-paradex"
-                  checked
-                />
-                <label class="form-check-label" for="check-paradex"
-                  >Paradex</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="whitebit"
-                  id="check-whitebit"
-                  checked
-                />
-                <label class="form-check-label" for="check-whitebit"
-                  >Whitebit</label>
-              </div>
-              <div class="form-check">
-                <input
-                  class="form-check-input exchange-checkbox"
-                  type="checkbox"
-                  value="xt"
-                  id="check-xt"
-                  checked
-                />
-                <label class="form-check-label" for="check-xt">XT</label>
-              </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="aden"
+                    id="check-aden"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-aden">Aden</label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="aster"
+                    id="check-aster"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-aster"
+                    >Aster</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="backpack"
+                    id="check-backpack"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-backpack"
+                    >Backpack</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="binance"
+                    id="check-binance"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-binance"
+                    >Binance</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="bingx"
+                    id="check-bingx"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-bingx"
+                    >BingX</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="bitget"
+                    id="check-bitget"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-bitget"
+                    >Bitget</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="bitrue"
+                    id="check-bitrue"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-bitrue"
+                    >Bitrue</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="bybit"
+                    id="check-bybit"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-bybit"
+                    >Bybit</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="extended"
+                    id="check-extended"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-extended"
+                    >Extended</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="gate"
+                    id="check-gate"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-gate"
+                    >Gate.io</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="hyperliquid"
+                    id="check-hyperliquid"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-hyperliquid"
+                    >Hyperliquid</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="kraken"
+                    id="check-kraken"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-kraken"
+                    >Kraken</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="kucoin"
+                    id="check-kucoin"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-kucoin"
+                    >KuCoin</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="lbank"
+                    id="check-lbank"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-lbank"
+                    >Lbank</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="mexc"
+                    id="check-mexc"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-mexc">MEXC</label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="okx"
+                    id="check-okx"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-okx">OKX</label>
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="paradex"
+                    id="check-paradex"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-paradex"
+                    >Paradex</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="pacifica"
+                    id="check-pacifica"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-pacifica"
+                    >Pacifica</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="whitebit"
+                    id="check-whitebit"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-whitebit"
+                    >Whitebit</label
+                  >
+                </div>
+                <div class="form-check">
+                  <input
+                    class="form-check-input exchange-checkbox"
+                    type="checkbox"
+                    value="xt"
+                    id="check-xt"
+                    checked
+                  />
+                  <label class="form-check-label" for="check-xt">XT</label>
+                </div>
               </div>
             </div>
 
@@ -956,100 +1071,90 @@
 
         <!-- CLOSED POSITIONS -->
         <div class="tab-pane fade" id="closed" role="tabpanel">
+          <!-- Header compacto -->
           <div
-            class="closed-header d-flex align-items-center justify-content-between mb-2"
+            class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2"
           >
-            <div
-              class="closed-header-left d-flex align-items-center gap-3 flex-wrap"
-            >
-              <h4 class="mb-0">Closed Positions</h4>
-              <!-- KPIs inline -->
+            <div class="d-flex align-items-center gap-2">
+              <h5 class="mb-0">Closed Positions</h5>
               <div
                 id="closedTotals"
-                class="closed-kpis d-flex align-items-center gap-3"
+                class="closed-kpis d-flex align-items-center gap-2"
               ></div>
             </div>
             <div class="d-flex align-items-center gap-2">
-              <button id="refreshClosed" class="refresh-btn">🔄 Refresh</button>
-              <button id="loadClosed" class="btn btn-success">
-                ▶ Load (cache)
+              <button id="refreshClosed" class="refresh-btn btn-sm">🔄</button>
+              <button id="loadClosed" class="btn btn-success btn-sm">
+                ▶ Load
               </button>
-              <span id="loadClosedStatus" class="text-white-50"></span>
+              <span id="loadClosedStatus" class="text-white-50 small"></span>
             </div>
           </div>
 
-          <!-- Filtros -->
-          <div class="card p-3 mb-3">
-            <div class="row g-3">
-              <div class="col-md-3">
-                <label for="filterExchange" class="form-label text-light"
-                  >Exchange</label
-                >
-                <input
-                  type="text"
-                  class="form-control dark-input"
-                  id="filterExchange"
-                  placeholder="Filter by exchange"
-                />
-              </div>
-              <div class="col-md-3">
-                <label for="filterSymbol" class="form-label text-light"
-                  >Symbol</label
-                >
-                <input
-                  type="text"
-                  class="form-control dark-input"
-                  id="filterSymbol"
-                  placeholder="Filter by symbol"
-                />
-              </div>
-              <div class="col-md-2">
-                <label for="filterSide" class="form-label text-light"
-                  >Side</label
-                >
-                <select class="form-select dark-input" id="filterSide">
-                  <option value="">All</option>
-                  <option value="LONG">Long</option>
-                  <option value="SHORT">Short</option>
-                  <option value="SPOTBUY">Spot Buy</option>
-                  <option value="SWAPSTABLE">Swap Stable</option>
-                  <option value="SPOTSELL">Spot Sell</option>
-                </select>
-              </div>
-              <div class="col-md-3">
-                <label for="filterDate" class="form-label text-light"
-                  >From Date</label
-                >
-                <input
-                  type="date"
-                  class="form-control dark-input"
-                  id="filterDate"
-                  value="2025-09-01"
-                  min="2025-09-01"
-                />
-              </div>
-              <div class="col-md-1 d-flex align-items-end">
-                <button id="applyFilters" class="btn btn-primary w-100">
-                  Apply
-                </button>
-              </div>
-            </div>
+          <!-- Filtros compactos en una línea -->
+          <div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
+            <input
+              type="text"
+              class="form-control form-control-sm dark-input"
+              id="filterExchange"
+              placeholder="Exchange"
+              style="width: 120px"
+            />
+            <input
+              type="text"
+              class="form-control form-control-sm dark-input"
+              id="filterSymbol"
+              placeholder="Symbol"
+              style="width: 120px"
+            />
+            <select
+              class="form-select form-select-sm dark-input"
+              id="filterSide"
+              style="width: 110px"
+            >
+              <option value="">All Sides</option>
+              <option value="LONG">Long</option>
+              <option value="SHORT">Short</option>
+              <option value="SPOTBUY">Spot Buy</option>
+              <option value="SWAPSTABLE">Swap Stable</option>
+              <option value="SPOTSELL">Spot Sell</option>
+            </select>
+            <input
+              type="date"
+              class="form-control form-control-sm dark-input"
+              id="filterDate"
+              value="2025-09-01"
+              min="2025-09-01"
+              style="width: 140px"
+            />
+            <button id="applyFilters" class="btn btn-primary btn-sm">
+              Apply
+            </button>
           </div>
 
           <!-- Controles de paginación superior -->
           <div class="d-flex justify-content-between align-items-center mb-3">
-            <div class="d-flex align-items-center">
-              <span class="text-light me-2">Show:</span>
-              <select
-                id="pageSizeSelect"
-                class="form-select dark-input"
-                style="width: auto"
+            <div class="d-flex align-items-center gap-3">
+              <div class="d-flex align-items-center">
+                <span class="text-light me-2">Show:</span>
+                <select
+                  id="pageSizeSelect"
+                  class="form-select dark-input"
+                  style="width: auto"
+                >
+                  <option value="10">10</option>
+                  <option value="20">20</option>
+                  <option value="30">30</option>
+                </select>
+                <span class="text-light ms-2">entries</span>
+              </div>
+              <button
+                id="deleteSelectedClosed"
+                class="btn btn-danger btn-sm"
+                style="display: none"
               >
-                <option value="10">10</option>
-                <option value="20">20</option>
-                <option value="30">30</option>
-              </select>
-              <span class="text-light ms-2">entries</span>
+                🗑️ Delete Selected (<span id="selectedCount">0</span>)
+              </button>
             </div>
             <div id="closedPaginationTop" class="pagination-container"></div>
           </div>
@@ -1092,314 +1197,908 @@
             ></div>
           </div>
         </div>
+
+        <!-- OPCIONES -->
+        <div class="tab-pane fade" id="options" role="tabpanel">
+          <div class="card p-3">
+            <h4 class="mb-3">Import Files</h4>
+            <div class="row g-3">
+              <div class="col-md-3">
+                <label class="form-label">Exchange</label>
+                <select id="opt-exchange" class="form-select dark-input">
+                  <option value="ourbit" selected>Ourbit</option>
+                  <option value="kcex">KCEX</option>
+                  <option value="lbank">LBANK</option>
+                </select>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Tipo de posición</label>
+                <select id="opt-product" class="form-select dark-input">
+                  <option value="Futures position" selected>
+                    Futures position
+                  </option>
+                  <!-- futuro: Spot position -->
+                </select>
+              </div>
+              <div class="col-md-3" id="file1-container">
+                <label class="form-label" id="file1-label"
+                  >Fund flow (Funding fees)</label
+                >
+                <input
+                  type="file"
+                  id="opt-fund"
+                  class="form-control dark-input"
+                  accept=".xlsx,.xls,.csv"
+                />
+              </div>
+              <div class="col-md-3" id="file2-container">
+                <label class="form-label" id="file2-label"
+                  >Fills history (opcional)</label
+                >
+                <input
+                  type="file"
+                  id="opt-fills"
+                  class="form-control dark-input"
+                  accept=".xlsx,.xls,.csv"
+                />
+              </div>
+              <div class="col-12 d-flex gap-2">
+                <button id="btn-import-ourbit" class="btn btn-primary">
+                  Importar
+                </button>
+                <span id="import-status" class="ms-2 text-white-50"></span>
+              </div>
+            </div>
+          </div>
+          <div class="card p-3 mt-3">
+            <h4 class="mb-3">Agregar posición cerrada (manual)</h4>
+            <div class="row g-3" id="manual-closed-form">
+              <div class="col-md-2">
+                <label class="form-label">Exchange</label>
+                <!-- select con exchanges (orden alfabético) -->
+                <select id="m-exchange" class="form-select dark-input">
+                  <option value="">-- select --</option>
+                  <option value="aden">Aden</option>
+                  <option value="Arbitrum">Arbitrum</option>
+                  <option value="aster">Aster</option>
+                  <option value="backpack">Backpack</option>
+                  <option value="Base OKX">Base OKX</option>
+                  <option value="bitrue">bitrue</option>
+                  <option value="binance">Binance</option>
+                  <option value="bingx">BingX</option>
+                  <option value="bitget">Bitget</option>
+                  <option value="BNB OKX">BNB OKX</option>
+                  <option value="bybit">Bybit</option>
+                  <option value="Ethereum OKX">Ethereum OKX</option>
+                  <option value="extended">Extended</option>
+                  <option value="gate">Gate</option>
+                  <option value="hyperliquid">Hyperliquid</option>
+                  <option value="kucoin">KuCoin</option>
+                  <option value="lbank">Lbank</option>
+                  <option value="mexc">MEXC</option>
+                  <option value="okx">OKX</option>
+                  <option value="Ourbit">Ourbit</option>
+                  <option value="paradex">Paradex</option>
+                  <option value="pacifica">Pacifica</option>
+                  <option value="Solana JUP">Solana JUP</option>
+                  <option value="whitebit">WhiteBIT</option>
+                  <option value="xt">XT</option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Symbol</label>
+                <input
+                  type="text"
+                  id="m-symbol"
+                  class="form-control dark-input"
+                  placeholder="BTCUSDT / ALPACAUSDT / ..."
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Side</label>
+                <!-- lado: long / short / spotbuy / spotsell -->
+                <select id="m-side" class="form-select dark-input">
+                  <option value="">-- select --</option>
+                  <option value="long">long</option>
+                  <option value="short">short</option>
+                  <option value="spotbuy">spotbuy</option>
+                  <option value="spotsell">spotsell</option>
+                </select>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Size</label>
+                <input
+                  type="number"
+                  step="0.00000001"
+                  id="m-size"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Entry price</label>
+                <input
+                  type="number"
+                  step="0.00000001"
+                  id="m-entry"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Close price</label>
+                <input
+                  type="number"
+                  step="0.00000001"
+                  id="m-close"
+                  class="form-control dark-input"
+                />
+              </div>
+
+              <div class="col-md-3">
+                <label class="form-label">Open time</label>
+                <input
+                  type="datetime-local"
+                  id="m-open"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-3">
+                <label class="form-label">Close time</label>
+                <input
+                  type="datetime-local"
+                  id="m-close-time"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Funding total</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="m-funding"
+                  class="form-control dark-input"
+                  placeholder="p.ej. -2.35"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Fee total</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="m-fees"
+                  class="form-control dark-input"
+                  placeholder="p.ej. -1.20"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Realized PnL (opcional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="m-realized"
+                  class="form-control dark-input"
+                  placeholder="si vacío: se compone"
+                />
+              </div>
+
+              <div class="col-md-2">
+                <label class="form-label">Initial margin (opcional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="m-initial-margin"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Notional (opcional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="m-notional"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Leverage (opcional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  id="m-leverage"
+                  class="form-control dark-input"
+                />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label">Liq. price (opcional)</label>
+                <input
+                  type="number"
+                  step="0.00000001"
+                  id="m-liq"
+                  class="form-control dark-input"
+                />
+              </div>
+
+              <div class="col-12 d-flex gap-2">
+                <button id="btn-save-manual-closed" class="btn btn-success">
+                  Guardar
+                </button>
+                <span
+                  id="manual-closed-status"
+                  class="ms-2 text-white-50"
+                ></span>
+              </div>
+            </div>
+          </div>
+          <div class="card p-3 mt-3">
+            <h4 class="mb-3">Load closed positions (force)</h4>
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <label class="form-label">Exchanges</label>
+                <div class="force-select-grid" id="force-exchange-grid">
+                  <div class="form-check">
+                    <input
+                      class="form-check-input"
+                      type="checkbox"
+                      id="force-check-all"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-check-all"
+                      >All exchanges</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="aden"
+                      id="force-ex-aden"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-aden"
+                      >Aden</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="aster"
+                      id="force-ex-aster"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-aster"
+                      >Aster</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="backpack"
+                      id="force-ex-backpack"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-backpack"
+                      >Backpack</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="bitrue"
+                      id="force-ex-bitrue"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-bitrue"
+                      >Bitrue</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="binance"
+                      id="force-ex-binance"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-binance"
+                      >Binance</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="bingx"
+                      id="force-ex-bingx"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-bingx"
+                      >BingX</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="bitget"
+                      id="force-ex-bitget"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-bitget"
+                      >Bitget</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="bybit"
+                      id="force-ex-bybit"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-bybit"
+                      >Bybit</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="extended"
+                      id="force-ex-extended"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-extended"
+                      >Extended</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="gate"
+                      id="force-ex-gate"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-gate"
+                      >Gate</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="hyperliquid"
+                      id="force-ex-hyperliquid"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-hyperliquid"
+                      >Hyperliquid</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="kucoin"
+                      id="force-ex-kucoin"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-kucoin"
+                      >KuCoin</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="kcex"
+                      id="force-ex-kcex"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-kcex"
+                      >Kcex</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="lbank"
+                      id="force-ex-lbank"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-lbank"
+                      >Lbank</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="mexc"
+                      id="force-ex-mexc"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-mexc"
+                      >MEXC</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="okx"
+                      id="force-ex-okx"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-okx"
+                      >OKX</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="paradex"
+                      id="force-ex-paradex"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-paradex"
+                      >Paradex</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="pacifica"
+                      id="force-ex-pacifica"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-pacifica"
+                      >Pacifica</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="whitebit"
+                      id="force-ex-whitebit"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-whitebit"
+                      >WhiteBIT</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input force-exchange-checkbox"
+                      type="checkbox"
+                      value="xt"
+                      id="force-ex-xt"
+                      checked
+                    />
+                    <label class="form-check-label" for="force-ex-xt">XT</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-lg-6">
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Days back (1–90)</label>
+                    <input
+                      type="number"
+                      id="force-days"
+                      class="form-control dark-input"
+                      min="1"
+                      max="90"
+                      value="30"
+                    />
+                  </div>
+                  <div class="col-md-6 d-flex align-items-end">
+                    <button id="btn-force-closed" class="btn btn-warning w-100">
+                      Load closed positions
+                    </button>
+                  </div>
+                  <div class="col-12">
+                    <span id="force-status" class="text-white-50"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card p-3 mt-3">
+            <h4 class="mb-3">Load funding fees (force)</h4>
+            <div class="row g-3">
+              <div class="col-lg-6">
+                <label class="form-label">Exchanges</label>
+                <div class="funding-select-grid" id="funding-exchange-grid">
+                  <div class="form-check">
+                    <input
+                      class="form-check-input"
+                      type="checkbox"
+                      id="funding-check-all"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-check-all"
+                      >All exchanges</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="backpack"
+                      id="funding-ex-backpack"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-backpack"
+                      >Backpack</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="aster"
+                      id="funding-ex-aster"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-aster"
+                      >Aster</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="binance"
+                      id="funding-ex-binance"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-binance"
+                      >Binance</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="aden"
+                      id="funding-ex-aden"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-aden"
+                      >Aden</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="extended"
+                      id="funding-ex-extended"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-extended"
+                      >Extended</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="kucoin"
+                      id="funding-ex-kucoin"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-kucoin"
+                      >KuCoin</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="mexc"
+                      id="funding-ex-mexc"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-mexc"
+                      >MEXC</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="gate"
+                      id="funding-ex-gate"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-gate"
+                      >Gate</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="okx"
+                      id="funding-ex-okx"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-okx"
+                      >OKX</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="bitget"
+                      id="funding-ex-bitget"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-bitget"
+                      >Bitget</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="bingx"
+                      id="funding-ex-bingx"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-bingx"
+                      >BingX</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="paradex"
+                      id="funding-ex-paradex"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-paradex"
+                      >Paradex</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="hyperliquid"
+                      id="funding-ex-hyperliquid"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-hyperliquid"
+                      >Hyperliquid</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="whitebit"
+                      id="funding-ex-whitebit"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-whitebit"
+                      >WhiteBIT</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="xt"
+                      id="funding-ex-xt"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-xt"
+                      >XT</label
+                    >
+                  </div>
+                  <div class="form-check">
+                    <input
+                      class="form-check-input funding-exchange-checkbox"
+                      type="checkbox"
+                      value="pacifica"
+                      id="funding-ex-pacifica"
+                      checked
+                    />
+                    <label class="form-check-label" for="funding-ex-pacifica"
+                      >Pacifica</label
+                    >
+                  </div>
+                </div>
+              </div>
+              <div class="col-lg-6">
+                <div class="row g-3">
+                  <div class="col-md-6">
+                    <label class="form-label">Days back (1–90)</label>
+                    <input
+                      type="number"
+                      id="funding-force-days"
+                      class="form-control dark-input"
+                      min="1"
+                      max="90"
+                      value="14"
+                    />
+                  </div>
+                  <div class="col-md-6 d-flex align-items-end">
+                    <button id="btn-force-funding" class="btn btn-info w-100">
+                      Load funding fees
+                    </button>
+                  </div>
+                  <div class="col-12">
+                    <span
+                      id="force-funding-status"
+                      class="text-white-50"
+                    ></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="tab-pane fade" id="options" role="tabpanel">
-        <div class="card p-3">
-          <h4 class="mb-3">Importar archivos (Ourbit)</h4>
-          <div class="row g-3">
-            <div class="col-md-3">
-              <label class="form-label">Exchange</label>
-              <select id="opt-exchange" class="form-select dark-input">
-                <option value="ourbit" selected>Ourbit</option>
-              </select>
+
+      <!-- Modal: Edit Position -->
+      <div class="modal fade" id="editModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">✏️ Edit Position</h5>
+              <button
+                type="button"
+                class="btn-close btn-close-white"
+                data-bs-dismiss="modal"
+              ></button>
             </div>
-            <div class="col-md-3">
-              <label class="form-label">Tipo de posición</label>
-              <select id="opt-product" class="form-select dark-input">
-                <option value="Futures position" selected>
-                  Futures position
-                </option>
-                <!-- futuro: Spot position -->
-              </select>
+            <div class="modal-body">
+              <div class="row">
+                <div class="col-md-4 mb-3">
+                  <label class="form-label">Exchange</label>
+                  <input
+                    type="text"
+                    class="form-control dark-input"
+                    id="edit-exchange"
+                    readonly
+                  />
+                </div>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label">Symbol</label>
+                  <input
+                    type="text"
+                    class="form-control dark-input"
+                    id="edit-symbol"
+                    readonly
+                  />
+                </div>
+                <div class="col-md-4 mb-3">
+                  <label class="form-label">Side</label>
+                  <select class="form-select dark-input" id="edit-side">
+                    <option value="long">Long</option>
+                    <option value="short">Short</option>
+                    <option value="spotbuy">Spot Buy</option>
+                    <option value="spotsell">Spot Sell</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Size</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-size"
+                    step="0.00000001"
+                  />
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Entry Price</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-entry-price"
+                    step="0.00000001"
+                  />
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Liquidation Price</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-liq"
+                    step="0.01"
+                  />
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Fees</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-fees"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Funding Fee</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-funding"
+                    step="0.01"
+                  />
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Realized PnL</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-realized-pnl"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+              <div class="row">
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Initial Margin</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-init-margin"
+                    step="0.01"
+                  />
+                </div>
+                <div class="col-md-6 mb-3">
+                  <label class="form-label">Margin</label>
+                  <input
+                    type="number"
+                    class="form-control dark-input"
+                    id="edit-margin"
+                    step="0.01"
+                  />
+                  <small class="text-muted"
+                    >Changes will be timestamped for APR calculation</small
+                  >
+                </div>
+              </div>
+              <div class="alert alert-warning">
+                <strong>⚠️ Note:</strong> Manual edits will override API values
+                and persist in the database.
+              </div>
             </div>
-            <div class="col-md-3">
-              <label class="form-label">Fund flow (Funding fees)</label>
-              <input
-                type="file"
-                id="opt-fund"
-                class="form-control dark-input"
-                accept=".xlsx,.xls,.csv"
-              />
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Fills history (opcional)</label>
-              <input
-                type="file"
-                id="opt-fills"
-                class="form-control dark-input"
-                accept=".xlsx,.xls,.csv"
-              />
-            </div>
-            <div class="col-12 d-flex gap-2">
-              <button id="btn-import-ourbit" class="btn btn-primary">
-                Importar
+            <div class="modal-footer">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-bs-dismiss="modal"
+              >
+                Cancel
               </button>
-              <span id="import-status" class="ms-2 text-white-50"></span>
-            </div>
-          </div>
-        </div>
-        <div class="card p-3 mt-3">
-          <h4 class="mb-3">Agregar posición cerrada (manual)</h4>
-          <div class="row g-3" id="manual-closed-form">
-            <div class="col-md-2">
-              <label class="form-label">Exchange</label>
-              <!-- select con exchanges (orden alfabético) -->
-              <select id="m-exchange" class="form-select dark-input">
-                <option value="">-- select --</option>
-                <option value="aden">Aden</option>
-                <option value="Arbitrum">Arbitrum</option>
-                <option value="aster">Aster</option>
-                <option value="backpack">Backpack</option>
-                <option value="Base OKX">Base OKX</option>
-                <option value="binance">Binance</option>
-                <option value="bingx">BingX</option>
-                <option value="bitget">Bitget</option>
-                <option value="BNB OKX">BNB OKX</option>
-                <option value="bybit">Bybit</option>
-                <option value="Ethereum OKX">Ethereum OKX</option>
-                <option value="extended">Extended</option>
-                <option value="gate">Gate</option>
-                <option value="hyperliquid">Hyperliquid</option>
-                <option value="kucoin">KuCoin</option>
-                <option value="lbank">Lbank</option>
-                <option value="mexc">MEXC</option>
-                <option value="okx">OKX</option>
-                <option value="Ourbit">Ourbit</option>
-                <option value="paradex">Paradex</option>
-                <option value="Solana JUP">Solana JUP</option>
-                <option value="whitebit">WhiteBIT</option>
-                <option value="xt">XT</option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Symbol</label>
-              <input
-                type="text"
-                id="m-symbol"
-                class="form-control dark-input"
-                placeholder="BTCUSDT / ALPACAUSDT / ..."
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Side</label>
-              <!-- lado: long / short / spotbuy / spotsell -->
-              <select id="m-side" class="form-select dark-input">
-                <option value="">-- select --</option>
-                <option value="long">long</option>
-                <option value="short">short</option>
-                <option value="spotbuy">spotbuy</option>
-                <option value="spotsell">spotsell</option>
-              </select>
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Size</label>
-              <input
-                type="number"
-                step="0.00000001"
-                id="m-size"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Entry price</label>
-              <input
-                type="number"
-                step="0.00000001"
-                id="m-entry"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Close price</label>
-              <input
-                type="number"
-                step="0.00000001"
-                id="m-close"
-                class="form-control dark-input"
-              />
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Open time</label>
-              <input
-                type="datetime-local"
-                id="m-open"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-3">
-              <label class="form-label">Close time</label>
-              <input
-                type="datetime-local"
-                id="m-close-time"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Funding total</label>
-              <input
-                type="number"
-                step="0.01"
-                id="m-funding"
-                class="form-control dark-input"
-                placeholder="p.ej. -2.35"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Fee total</label>
-              <input
-                type="number"
-                step="0.01"
-                id="m-fees"
-                class="form-control dark-input"
-                placeholder="p.ej. -1.20"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Realized PnL (opcional)</label>
-              <input
-                type="number"
-                step="0.01"
-                id="m-realized"
-                class="form-control dark-input"
-                placeholder="si vacío: se compone"
-              />
-            </div>
-
-            <div class="col-md-2">
-              <label class="form-label">Initial margin (opcional)</label>
-              <input
-                type="number"
-                step="0.01"
-                id="m-initial-margin"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Notional (opcional)</label>
-              <input
-                type="number"
-                step="0.01"
-                id="m-notional"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Leverage (opcional)</label>
-              <input
-                type="number"
-                step="0.01"
-                id="m-leverage"
-                class="form-control dark-input"
-              />
-            </div>
-            <div class="col-md-2">
-              <label class="form-label">Liq. price (opcional)</label>
-              <input
-                type="number"
-                step="0.00000001"
-                id="m-liq"
-                class="form-control dark-input"
-              />
-            </div>
-
-            <div class="col-12 d-flex gap-2">
-              <button id="btn-save-manual-closed" class="btn btn-success">
-                Guardar
+              <button type="button" class="btn btn-primary" id="save-edit-btn">
+                Save Changes
               </button>
-              <span id="manual-closed-status" class="ms-2 text-white-50"></span>
-            </div>
-          </div>
-        </div>
-        <div class="card p-3 mt-3">
-          <h4 class="mb-3">Load closed positions (force)</h4>
-          <div class="row g-3">
-            <div class="col-md-3">
-              <label class="form-label">Exchange</label>
-              <select id="force-exchange" class="form-select dark-input">
-                <option value="aden">Aden</option>
-                <option value="aster">Aster</option>
-                <option value="backpack">Backpack</option>
-                <option value="binance">Binance</option>
-                <option value="bingx">BingX</option>
-                <option value="bitget">Bitget</option>
-                <option value="bybit">Bybit</option>
-                <option value="extended">Extended</option>
-                <option value="gate">Gate</option>
-                <option value="hyperliquid">Hyperliquid</option>
-                <option value="kucoin">KuCoin</option>
-                <option value="lbank">Lbank</option>
-                <option value="mexc">MEXC</option>
-                <option value="okx">OKX</option>
-                <option value="paradex">Paradex</option>
-                <option value="whitebit">WhiteBIT</option>
-                <option value="xt">XT</option>
-              </select>
-            </div>
-
-            <div class="col-md-3">
-              <label class="form-label">Days back (1–60)</label>
-              <input
-                type="number"
-                id="force-days"
-                class="form-control dark-input"
-                min="1"
-                max="60"
-                value="30"
-              />
-            </div>
-
-            <div class="col-md-3 d-flex align-items-end">
-              <button id="btn-force-closed" class="btn btn-warning w-100">
-                Load closed positions
-              </button>
-            </div>
-
-            <div class="col-md-3 d-flex align-items-end">
-              <span id="force-status" class="text-white-50"></span>
             </div>
           </div>
         </div>
       </div>
-    </div>
-
- <!-- Modal: Edit Position -->
-  <div class="modal fade" id="editModal" tabindex="-1">
-    <div class="modal-dialog">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title">✏️ Edit Position</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-        </div>
-        <div class="modal-body">
-          <div class="mb-3">
-            <label class="form-label">Symbol</label>
-            <input type="text" class="form-control dark-input" id="edit-symbol" readonly>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Size Multiplier</label>
-            <input type="number" class="form-control dark-input" id="edit-size-multiplier" value="1" step="0.1" min="0.1">
-            <small class="text-muted">Current size will be multiplied by this value</small>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Unrealized PnL Multiplier</label>
-            <input type="number" class="form-control dark-input" id="edit-upnl-multiplier" value="1" step="0.1" min="0.1">
-            <small class="text-muted">Current unrealized PnL will be multiplied by this value</small>
-          </div>
-          <div class="alert alert-info">
-            <strong>Preview:</strong><br>
-            New Size: <span id="preview-size">-</span><br>
-            New Unrealized PnL: <span id="preview-upnl">-</span>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="button" class="btn btn-primary" id="save-edit-btn">Save Changes</button>
-        </div>
-      </div>
-    </div>
-  </div>
-
 
       <div class="modal" id="modalManualOpen" tabindex="-1">
         <div class="modal-dialog modal-lg">
@@ -1419,9 +2118,15 @@
                   <label class="form-label">Exchange</label>
                   <select name="exchange" class="form-select">
                     <option>Arbitrum</option>
+                    <option>Binance</option>
+                    <option>Bingx</option>
+                    <option>Bitrue</option>
+                    <option>Bitget</option>
                     <option>Base OKX</option>
                     <option>BNB OKX</option>
                     <option>Ethereum OKX</option>
+                    <option>EdgeX</option>
+                    <option>Kcex</option>
                     <option>Lbank</option>
                     <option>Ourbit</option>
                     <option>Solana JUP</option>
@@ -1464,8 +2169,13 @@
                   />
                 </div>
                 <div class="col-md-4">
-                  <label class="form-label">Open time (epoch s)</label>
-                  <input name="open_time" type="number" class="form-control" />
+                  <label class="form-label">Open time</label>
+                  <input
+                    name="open_time"
+                    type="datetime-local"
+                    class="form-control"
+                    step="1"
+                  />
                 </div>
 
                 <div class="col-md-4">
@@ -1596,12 +2306,21 @@
 
     <script>
       let allFundingData = [];
+      let fundingDataLoaded = false;
+      let lastFundingExchangeKey = "";
       function toMs(ts) {
         if (ts === null || ts === undefined) return NaN;
         const n = Number(ts);
         if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n; // 10 dígitos => s
         const d = Date.parse(ts);
         return Number.isFinite(d) ? d : NaN;
+      }
+
+      function normalizeTimestampMs(value) {
+        if (value === null || value === undefined) return null;
+        const n = Number(value);
+        if (!Number.isFinite(n) || n <= 0) return null;
+        return n >= 1e12 ? n : n * 1000;
       }
 
       function cleanSymbol(sym) {
@@ -1898,11 +2617,17 @@
           el.textContent = Number.isFinite(value)
             ? `${value.toFixed(2)}%`
             : "--";
-          el.classList.remove("spread-positive", "spread-negative", "text-white-50");
+          el.classList.remove(
+            "spread-positive",
+            "spread-negative",
+            "text-white-50"
+          );
           if (!Number.isFinite(value)) {
             el.classList.add("text-white-50");
           } else {
-            el.classList.add(value >= 0 ? "spread-positive" : "spread-negative");
+            el.classList.add(
+              value >= 0 ? "spread-positive" : "spread-negative"
+            );
           }
         };
 
@@ -1916,9 +2641,9 @@
             ? spreads.diff
             : spreads.entry;
           legacy.innerHTML = Number.isFinite(fallback)
-            ? `<span class="${fallback >= 0 ? "spread-positive" : "spread-negative"}">${fallback.toFixed(
-                2
-              )}%</span>`
+            ? `<span class="${
+                fallback >= 0 ? "spread-positive" : "spread-negative"
+              }">${fallback.toFixed(2)}%</span>`
             : "--";
         }
       }
@@ -2279,43 +3004,104 @@
           const baseSym = cleanSymbol(symbol);
           const now = new Date();
           const d0 = ymd(now);
-          const d1 = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-          const d2 = ymd(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2));
+          const d1 = ymd(
+            new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1)
+          );
+          const d2 = ymd(
+            new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2)
+          );
           const f3 = {
             d0: sumFundingForDay(baseSym, d0),
             d1: sumFundingForDay(baseSym, d1),
             d2: sumFundingForDay(baseSym, d2),
           };
+          const usesWs = positions.some(
+            (row) => (row?.data_source || "").toLowerCase() === "ws"
+          );
+
+          // Encontrar la posición más reciente (mayor open_time)
+          const mostRecent = positions.reduce((latest, current) => {
+            const latestTime = Number(latest?.open_time || 0);
+            const currentTime = Number(current?.open_time || 0);
+            return currentTime > latestTime ? current : latest;
+          }, positions[0]);
+
+          const openTimeFormatted = (() => {
+            const tsMs = normalizeTimestampMs(mostRecent?.open_time);
+            if (!tsMs) return "-";
+            const d = new Date(tsMs);
+            const dd = String(d.getDate()).padStart(2, "0");
+            const mm = String(d.getMonth() + 1).padStart(2, "0");
+            const yyyy = d.getFullYear();
+            const hh = String(d.getHours()).padStart(2, "0");
+            const min = String(d.getMinutes()).padStart(2, "0");
+            return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+          })();
 
           let card = `
-            <div class="strategy-card">
+            <div class="strategy-card" data-symbol="${baseSym}" data-exchange="${
+            positions[0]?.exchange || ""
+          }">
             <div class="strategy-header">
-              <div class="d-flex w-100 justify-content-between align-items-start flex-wrap gap-3">
-                <div>
-                  <h5 class="mb-1">
+              <div class="d-flex w-100 justify-content-between align-items-center flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-3">
+                  <h5 class="mb-0">
                     ${cleanSymbol(symbol)}
-                    ${positions.length > 1 ? '<span class="badge bg-warning text-dark">DELTA NEUTRAL</span>' : ''}
+                    ${
+                      usesWs
+                        ? '<span class="badge bg-info text-dark ms-1">WS</span>'
+                        : ""
+                    }
                   </h5>
+                  ${
+                    positions.length > 1
+                      ? `
                   <div class="header-spread-grid">
                     <div class="spread-box">
-                      <div class="spread-label">Spread Entry</div>
-                      <div class="spread-value" id="spread-entry-${cleanSymbol(symbol)}">--</div>
+                      <div class="spread-label">Entry</div>
+                      <div class="spread-value" id="spread-entry-${cleanSymbol(
+                        symbol
+                      )}">--</div>
                     </div>
                     <div class="spread-box">
-                      <div class="spread-label">Spread Mark</div>
-                      <div class="spread-value" id="spread-mark-${cleanSymbol(symbol)}">--</div>
+                      <div class="spread-label">Mark</div>
+                      <div class="spread-value" id="spread-mark-${cleanSymbol(
+                        symbol
+                      )}">--</div>
                     </div>
                     <div class="spread-box">
-                      <div class="spread-label">Δ Spread</div>
-                      <div class="spread-value" id="spread-diff-${cleanSymbol(symbol)}">--</div>
+                      <div class="spread-label">Difference</div>
+                      <div class="spread-value" id="spread-diff-${cleanSymbol(
+                        symbol
+                      )}">--</div>
                     </div>
+                    <span class="badge bg-warning text-dark">DN</span>
                   </div>
-                  <span id="spread-${cleanSymbol(symbol)}" class="d-none">-</span>
+                  `
+                      : ""
+                  }
+                  <span id="spread-${cleanSymbol(
+                    symbol
+                  )}" class="d-none">-</span>
                 </div>
-                <div class="d-flex gap-3 small flex-wrap justify-content-end">
-                  <div><span class="text-white-50">Funding D-2:</span> ${fmtFundingVal(f3.d2)}</div>
-                  <div><span class="text-white-50">D-1:</span> ${fmtFundingVal(f3.d1)}</div>
-                  <div><span class="text-white-50">Hoy:</span> ${fmtFundingVal(f3.d0)}</div>
+                <div class="d-flex gap-2 small flex-wrap justify-content-end align-items-center">
+                  <div><span class="text-white-50">Opened:</span> <span class="text-info">${openTimeFormatted}</span></div>
+                  <div class="vr" style="opacity: 0.3;"></div>
+                  <div><span class="text-white-50">Funding D-2:</span> <span class="funding-d2 metric-value-sm" data-exchange="${
+                    positions[0]?.exchange || ""
+                  }" data-symbol="${baseSym}">${fmtFundingVal(
+            f3.d2
+          )}</span></div>
+                  <div><span class="text-white-50">D-1:</span> <span class="funding-d1 metric-value-sm" data-exchange="${
+                    positions[0]?.exchange || ""
+                  }" data-symbol="${baseSym}">${fmtFundingVal(
+            f3.d1
+          )}</span></div>
+                  <div><span class="text-white-50">Hoy:</span> <span class="funding-today metric-value-sm" data-exchange="${
+                    positions[0]?.exchange || ""
+                  }" data-symbol="${baseSym}">${fmtFundingVal(
+            f3.d0
+          )}</span></div>
                 </div>
               </div>
             </div>
@@ -2325,11 +3111,11 @@
                 <tr>
                   <th>Exchange</th><th>Symbol</th><th>Side</th><th>Size</th>
                   <th>Entry</th><th>Mark</th><th>Liq.</th>
-                  <th>Inc. to Liq</th><th>Closed %</th>
+                  <th>Inc. to Liq</th><th>Closed %</th><th>Init. Margin</th><th>Margin</th>
                   <th>Notional</th><th>Funding rate</th>
                   <th>Interval</th><th>Unrealized PnL</th><th>Fee</th>
                   <th>Funding Fee</th><th>Realized PnL</th>
-                  <th>Actions</th>
+                  <th>Edit</th>
                 </tr>
               </thead>
               <tbody>`;
@@ -2345,12 +3131,22 @@
             const side = (p?.side || "").toLowerCase();
             const sideLabel = side ? side.toUpperCase() : "-";
             const originalSize = Number(p?.size || 0);
-            const cachedSize = getCachedSize(p?.exchange || "", p?.symbol || "", originalSize);
+            const cachedSize = getCachedSize(
+              p?.exchange || "",
+              p?.symbol || "",
+              originalSize
+            );
             const displaySize = cachedSize;
             const entry = Number(p?.entry_price || 0);
             const mark = Number(p?.mark_price || 0);
             const liq = Number(p?.liquidation_price || 0);
-            const notional = Number(p?.notional || (mark > 0 ? Math.abs(displaySize * mark) : 0));
+            const notional = Number(
+              p?.notional || (mark > 0 ? Math.abs(displaySize * mark) : 0)
+            );
+            const sourceBadge =
+              (p?.data_source || "").toLowerCase() === "ws"
+                ? '<span class="badge bg-info text-dark ms-1">WS</span>'
+                : "";
 
             totalNotional += notional;
             totalMargin += Number(p?.margin || 0);
@@ -2359,65 +3155,134 @@
             if (side === "long") sizeLong += displaySize;
             if (side === "short") sizeShort += displaySize;
 
-            const incToLiqPct = mark > 0 && liq > 0 ? (Math.abs(mark - liq) / mark) * 100 : null;
-            const initSize = Number(p?.initial_size ?? Number(p?.size || 0) + Number(p?.closed_size || 0));
+            const incToLiqPct =
+              mark > 0 && liq > 0 ? (Math.abs(mark - liq) / mark) * 100 : null;
+            const initSize = Number(
+              p?.initial_size ??
+                Number(p?.size || 0) + Number(p?.closed_size || 0)
+            );
             const closedSize = Number(p?.closed_size || 0);
-            const closedPct = initSize > 0 ? (100 * closedSize) / initSize : null;
+            const closedPct =
+              initSize > 0 ? (100 * closedSize) / initSize : null;
 
             card += `
               <tr>
-                <td>${p?.exchange || ""}</td>
+                <td>${p?.exchange || ""}${sourceBadge}</td>
                 <td>${cleanSymbol(p?.symbol)}</td>
                 <td><span class="badge ${
-                  side === "long" ? "badge-long" : side === "short" ? "badge-short" : "bg-secondary"
+                  side === "long"
+                    ? "badge-long"
+                    : side === "short"
+                    ? "badge-short"
+                    : "bg-secondary"
                 }">${sideLabel}</span></td>
                 <td>${fmt(displaySize, 2)}</td>
                 <td>${fmt(entry)}</td>
                 <td>${fmt(mark)}</td>
                 <td>${fmt(liq)}</td>
-                <td>${incToLiqPct === null ? "-" : `<span class="risk-pill ${riskClass(incToLiqPct)}">${incToLiqPct.toFixed(1)}%</span>`}</td>
-                <td>${closedPct === null ? "-" : closedPct.toFixed(1) + "%"}</td>
+                <td>${
+                  incToLiqPct === null
+                    ? "-"
+                    : `<span class="risk-pill ${riskClass(
+                        incToLiqPct
+                      )}">${incToLiqPct.toFixed(1)}%</span>`
+                }</td>
+                <td>${
+                  closedPct === null ? "-" : closedPct.toFixed(1) + "%"
+                }</td>
+                <td>$${fmt(p?.init_margin ?? 0, 2)}</td>
+                <td>$${fmt(p?.main_margin ?? 0, 2)}</td>
                 <td>$${fmt(notional, 2)}</td>
-                <td>${(p?.funding_rate ?? "") === "" ? "-" : (Number(p.funding_rate) * 100).toFixed(4) + "%"}</td>
-                <td>${p?.funding_interval_hours ?? p?.funding_interval_h ?? "-"}</td>
-                <td class="${(Number(p?.unrealized_pnl) || 0) >= 0 ? "pnl-positive" : "pnl-negative"}">$${fmt(p?.unrealized_pnl, 2)}</td>
-                <td class="${(Number(p?.fee) || 0) >= 0 ? "pnl-positive" : "pnl-negative"}">$${fmt(p?.fee, 2)}</td>
-                <td class="${(Number(p?.funding_fee) || 0) >= 0 ? "pnl-positive" : "pnl-negative"}">$${fmt(p?.funding_fee, 2)}</td>
-                <td class="${(Number(p?.realized_pnl) || 0) >= 0 ? "pnl-positive" : "pnl-negative"}">$${fmt(p?.realized_pnl, 2)}</td>
+                <td>${
+                  (p?.funding_rate ?? "") === ""
+                    ? "-"
+                    : (Number(p.funding_rate) * 100).toFixed(4) + "%"
+                }</td>
+                <td>${
+                  p?.funding_interval_hours ?? p?.funding_interval_h ?? "-"
+                }</td>
+                <td class="${
+                  (Number(p?.unrealized_pnl) || 0) >= 0
+                    ? "pnl-positive"
+                    : "pnl-negative"
+                }">$${fmt(p?.unrealized_pnl, 2)}</td>
+                <td class="${
+                  (Number(p?.fee) || 0) >= 0 ? "pnl-positive" : "pnl-negative"
+                }">$${fmt(p?.fee, 2)}</td>
+                <td class="${
+                  (Number(p?.funding_fee) || 0) >= 0
+                    ? "pnl-positive"
+                    : "pnl-negative"
+                }">$${fmt(p?.funding_fee, 2)}</td>
+                <td class="${
+                  (Number(p?.realized_pnl) || 0) >= 0
+                    ? "pnl-positive"
+                    : "pnl-negative"
+                }">$${fmt(p?.realized_pnl, 2)}</td>
                 <td>
-                  <div class="d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-warning edit-size-btn"
-                            data-exchange="${p?.exchange || ""}"
-                            data-symbol="${p?.symbol || ""}"
-                            data-current-size="${fmt(displaySize, 2)}">
-                      ✏️ Edit Size
-                    </button>
-                    ${p?._source === "manual" || !!p?.manual_id ? `
-                      <button class="btn btn-sm btn-outline-danger" data-action="del" data-id="${p?.manual_id || ""}">Delete</button>
-                      <button class="btn btn-sm btn-outline-success" data-action="send" data-id="${p?.manual_id || ""}">Send to closed</button>
-                    ` : ""}
-                  </div>
+                  <button class="btn btn-sm btn-outline-primary"
+                          onclick='openEditModal(${JSON.stringify(p)})'>
+                    ✏️
+                  </button>
+                  ${
+                    p?._source === "manual" || !!p?.manual_id
+                      ? `
+                    <button class="btn btn-sm btn-outline-danger btn-sm" data-action="del" data-id="${
+                      p?.manual_id || ""
+                    }">🗑</button>
+                    <button class="btn btn-sm btn-outline-success btn-sm" data-action="send" data-id="${
+                      p?.manual_id || ""
+                    }">→</button>
+                  `
+                      : ""
+                  }
                 </td>
               </tr>`;
           });
 
           card += `</tbody></table>
             <div class="summary-grid">
-              <div class="summary-item"><h6>Total Notional</h6><p>$${fmt(totalNotional, 2)}</p></div>
-              <div class="summary-item"><h6>Total Margin</h6><p>$${fmt(totalMargin, 2)}</p></div>
-              <div class="summary-item"><h6>Size Long</h6><p>${fmt(sizeLong, 2)}</p></div>
-              <div class="summary-item"><h6>Size Short</h6><p>${fmt(sizeShort, 2)}</p></div>
-              <div class="summary-item"><h6>Net Exposure</h6><p>${fmt(sizeLong - sizeShort, 2)}</p></div>
+              <div class="summary-item"><h6>Total Notional</h6><p>$${fmt(
+                totalNotional,
+                2
+              )}</p></div>
+              <div class="summary-item"><h6>Total Margin</h6><p>$${fmt(
+                totalMargin,
+                2
+              )}</p></div>
+              <div class="summary-item"><h6>Size Long</h6><p>${fmt(
+                sizeLong,
+                2
+              )}</p></div>
+              <div class="summary-item"><h6>Size Short</h6><p>${fmt(
+                sizeShort,
+                2
+              )}</p></div>
+              <div class="summary-item"><h6>Net Exposure</h6><p>${fmt(
+                sizeLong - sizeShort,
+                2
+              )}</p></div>
               <div class="summary-item">
-                <h6>Funding Rate APR</h6>
-                <p>${(() => { const v = calcNetFundingAPR(positions); return v === null ? "-" : v.toFixed(2) + "%"; })()}</p>
+                <h6>FR APR</h6>
+                <p>${(() => {
+                  const v = calcNetFundingAPR(positions);
+                  return v === null ? "-" : v.toFixed(2) + "%";
+                })()}</p>
               </div>
               <div class="summary-item">
-                <h6>Funding Rate Position APR</h6>
-                <p>${positions?.[0]?.group_funding_position_apr ?? positions?.group_funding_position_apr ?? "-"}</p>
+                <h6>FR Position APR</h6>
+                <p>${
+                  positions?.[0]?.group_funding_position_apr ??
+                  positions?.group_funding_position_apr ??
+                  "-"
+                }</p>
               </div>
-              <div class="summary-item"><h6>Unrealized PnL</h6><p class="${unrealizedTotal >= 0 ? "pnl-positive" : "pnl-negative"}">$${fmt(unrealizedTotal, 2)}</p></div>
-              <div class="summary-item"><h6>Realized PnL</h6><p class="${realizedTotal >= 0 ? "pnl-positive" : "pnl-negative"}">$${fmt(realizedTotal, 2)}</p></div>
+              <div class="summary-item"><h6>Unrealized PnL</h6><p class="${
+                unrealizedTotal >= 0 ? "pnl-positive" : "pnl-negative"
+              }">$${fmt(unrealizedTotal, 2)}</p></div>
+              <div class="summary-item"><h6>Realized PnL</h6><p class="${
+                realizedTotal >= 0 ? "pnl-positive" : "pnl-negative"
+              }">$${fmt(realizedTotal, 2)}</p></div>
             </div>
           </div>`;
 
@@ -2425,24 +3290,6 @@
           renderSpread(symbol, positions);
         });
       }
-      loadFundingData()
-        .then(() => {
-          return fetch("/api/positions");
-        })
-        .then((r) => r.json())
-        .then((data) => {
-          const rows = Array.isArray(data?.positions) ? data.positions : [];
-          renderOpenPositionsFromRows(rows);
-        })
-                .then(() => {
-          // Actualizar funding de los últimos días
-          updateFundingForOpenPositions();
-        })
-        .catch((err) => {
-          console.error("❌ Error loading /api/positions", err);
-          document.getElementById("positions-container").innerHTML =
-            "<p>Error loading positions.</p>";
-        });
 
       // (Deprecated) Old edit-size listeners removed to avoid null element errors
 
@@ -2452,10 +3299,35 @@
 
       let currentPage = 1;
       let itemsPerPage = 7; // Por defecto últimos 7 días
-    
 
-      function loadFundingData() {
-        return fetch("/api/funding")
+      function loadFundingData(options = {}) {
+        const { force = false, exchangesOverride = null } = options;
+        const exchanges =
+          Array.isArray(exchangesOverride) && exchangesOverride.length
+            ? exchangesOverride
+            : getSelectedExchanges();
+        const key = exchanges.slice().sort().join(",") || "__all__";
+
+        if (
+          !force &&
+          fundingDataLoaded &&
+          key === lastFundingExchangeKey &&
+          allFundingData.length
+        ) {
+          return Promise.resolve(allFundingData);
+        }
+
+        const params = new URLSearchParams();
+        if (exchanges.length) {
+          params.set("exchanges", exchanges.join(","));
+        }
+        if (force) {
+          params.set("refresh", "1");
+        }
+
+        const qs = params.toString();
+
+        return fetch(`/api/funding${qs ? `?${qs}` : ""}`)
           .then((r) => r.json())
           .then((data) => {
             // ⬇️ normalizamos 'timestamp' y 'symbol' para TODOS los adapters
@@ -2471,8 +3343,10 @@
 
             // orden más reciente primero
             allFundingData.sort((a, b) => b.timestamp - a.timestamp);
-
+            fundingDataLoaded = true;
+            lastFundingExchangeKey = key;
             applyDaysFilter();
+            updateFundingForOpenPositions();
           })
           .catch((err) => {
             console.error("❌ Error loading funding fees:", err);
@@ -2684,15 +3558,15 @@
         }
       }
 
- 
-            // Cargar funding fees cuando se muestre la pestaña
-      document.getElementById('funding-tab')?.addEventListener('shown.bs.tab', function () {
-        loadFundingData();
-      });
+      // Cargar funding fees cuando se muestre la pestaña
+      document
+        .getElementById("funding-tab")
+        ?.addEventListener("shown.bs.tab", function () {
+          if (!fundingDataLoaded) {
+            loadFundingData();
+          }
+        });
 
-      // Cargar funding fees inicialmente
-      loadFundingData();
-      
       // Event listeners
       document
         .getElementById("daysSelector")
@@ -2704,7 +3578,7 @@
       document
         .getElementById("refreshFunding")
         .addEventListener("click", function () {
-          loadFundingData();
+          loadFundingData({ force: true });
         });
 
       // === CLOSED POSITIONS ===
@@ -3063,6 +3937,9 @@
 
               return `
                 <tr>
+                    <td><input type="checkbox" class="closed-pos-checkbox" data-id="${
+                      p.id || 0
+                    }"></td>
                     <td>${p.exchange}</td>
                     <td>${cleanSymbol(p.symbol)}</td>
                     <td>
@@ -3154,6 +4031,7 @@
                     <table class="closed-position-table">
                     <thead>
                         <tr>
+                        <th><input type="checkbox" class="select-all-card" title="Select all"></th>
                         <th>Exchange</th><th>Symbol</th><th>Side</th><th>Size</th>
                         <th>Entry</th><th>Close</th><th>Margin</th>
                         <th>PnL</th><th>Fees</th><th>Funding</th><th>Realized</th>
@@ -3351,7 +4229,84 @@
       });
 
       // Cargar closed positions inmediatamente
-        loadClosedPositions();
+      loadClosedPositions();
+
+      // =====================================================
+      // CHECKBOX SELECTION & DELETE LOGIC FOR CLOSED POSITIONS
+      // =====================================================
+      function updateDeleteButtonVisibility() {
+        const deleteBtn = document.getElementById("deleteSelectedClosed");
+        const countSpan = document.getElementById("selectedCount");
+        const checked = document.querySelectorAll(
+          ".closed-pos-checkbox:checked"
+        );
+        const count = checked.length;
+
+        if (deleteBtn && countSpan) {
+          countSpan.textContent = count;
+          deleteBtn.style.display = count > 0 ? "inline-block" : "none";
+        }
+      }
+
+      // Event delegation for checkboxes
+      document.addEventListener("change", function (e) {
+        // Individual row checkbox
+        if (e.target.classList.contains("closed-pos-checkbox")) {
+          updateDeleteButtonVisibility();
+        }
+        // Select all checkbox in card header
+        if (e.target.classList.contains("select-all-card")) {
+          const table = e.target.closest("table");
+          if (table) {
+            const checkboxes = table.querySelectorAll(".closed-pos-checkbox");
+            checkboxes.forEach((cb) => (cb.checked = e.target.checked));
+            updateDeleteButtonVisibility();
+          }
+        }
+      });
+
+      // Delete button handler
+      document
+        .getElementById("deleteSelectedClosed")
+        ?.addEventListener("click", async function () {
+          const checked = document.querySelectorAll(
+            ".closed-pos-checkbox:checked"
+          );
+          const ids = Array.from(checked)
+            .map((cb) => parseInt(cb.dataset.id))
+            .filter((id) => id > 0);
+
+          if (ids.length === 0) return;
+
+          const confirmed = confirm(
+            `¿Estás seguro de que quieres borrar ${ids.length} posición(es) cerrada(s)?\n\nEsta acción no se puede deshacer.`
+          );
+          if (!confirmed) return;
+
+          try {
+            this.disabled = true;
+            this.textContent = "🗑️ Borrando...";
+
+            const res = await fetch("/api/closed/delete", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ids: ids }),
+            });
+
+            const data = await res.json();
+            if (!res.ok) throw new Error(data?.error || "Error al borrar");
+
+            alert(`✅ ${data.deleted} posición(es) borrada(s)`);
+
+            // Recargar la lista
+            await loadClosedPositions();
+          } catch (e) {
+            alert("❌ Error: " + e.message);
+          } finally {
+            this.disabled = false;
+            updateDeleteButtonVisibility();
+          }
+        });
 
       // También agregar un event listener para cuando se muestre la pestaña de Closed Positions
       document.addEventListener("DOMContentLoaded", function () {
@@ -3378,8 +4333,15 @@
             const fd = new FormData();
             fd.append("exchange", exchange);
             fd.append("product_type", product);
-            if (fFund) fd.append("fund_flow", fFund);
-            if (fFills) fd.append("fills", fFills);
+
+            // Diferentes nombres de campos según el exchange
+            if (exchange === "ourbit") {
+              if (fFund) fd.append("fund_flow", fFund);
+              if (fFills) fd.append("fills", fFills);
+            } else if (exchange === "kcex") {
+              if (fFund) fd.append("capital_flow", fFund);
+              if (fFills) fd.append("trade_history", fFills);
+            }
 
             st.textContent = "Importando…";
             try {
@@ -3390,9 +4352,41 @@
               const data = await res.json();
               if (!res.ok)
                 throw new Error(data?.error || "Error de importación");
-              st.textContent = `✅ Funding: ${data.funding_inserted} | Closed insertados: ${data.closed_inserted} (roundtrips detectados: ${data.roundtrips_detected})`;
+
+              // Mensaje según exchange
+              if (exchange === "kcex") {
+                st.textContent = `✅ Funding: ${
+                  data.funding_saved || 0
+                } | Posiciones: ${data.positions_saved || 0}`;
+              } else {
+                st.textContent = `✅ Funding: ${
+                  data.funding_inserted || 0
+                } | Closed: ${data.closed_inserted || 0} (roundtrips: ${
+                  data.roundtrips_detected || 0
+                })`;
+              }
             } catch (e) {
               st.textContent = "❌ " + e.message;
+            }
+          });
+
+        // Cambiar labels según el exchange seleccionado
+        document
+          .getElementById("opt-exchange")
+          ?.addEventListener("change", function () {
+            const exchange = this.value;
+            const label1 = document.getElementById("file1-label");
+            const label2 = document.getElementById("file2-label");
+
+            if (exchange === "ourbit") {
+              label1.textContent = "Fund flow (Funding fees)";
+              label2.textContent = "Fills history (opcional)";
+            } else if (exchange === "kcex") {
+              label1.textContent = "Capital Flow (Funding fees)";
+              label2.textContent = "Trade History";
+            } else if (exchange === "lbank") {
+              label1.textContent = "Futures CSV (Funding fees)";
+              label2.textContent = "Filled CSV (Trades)";
             }
           });
         function parseLocalDateTimeToSeconds(value) {
@@ -3488,42 +4482,51 @@
           .getElementById("btn-force-closed")
           ?.addEventListener("click", async () => {
             const st = document.getElementById("force-status");
-            const exchange = document
-              .getElementById("force-exchange")
-              .value.trim();
+            const exchanges = getCheckedValuesFromSelector(
+              ".force-exchange-checkbox:checked"
+            );
             const daysInput = parseInt(
               document.getElementById("force-days").value,
               10
             );
             const days = Math.min(
-              60,
+              90,
               Math.max(1, Number.isFinite(daysInput) ? daysInput : 30)
             );
 
-            if (!exchange) {
-              st.textContent = "❌ Selecciona un exchange.";
+            if (!exchanges.length) {
+              st.textContent = "❌ Selecciona al menos un exchange.";
               return;
             }
 
             st.textContent = "⏳ Cargando cerradas…";
             try {
-              // Endpoint backend sugerido: POST /api/closed/load
-              const res = await fetch("/api/closed/load", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ exchange, days }),
-              });
-              const data = await res.json();
+              const summaries = [];
+              for (const exchange of exchanges) {
+                try {
+                  const res = await fetch("/api/closed/load", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ exchange, days }),
+                  });
+                  const data = await res.json();
 
-              if (!res.ok) throw new Error(data?.error || "Sync error");
+                  if (!res.ok) throw new Error(data?.error || "Sync error");
 
-              // Mensaje estándar con recuentos si tu backend los devuelve
-              const ins = data?.inserted ?? data?.saved ?? 0;
-              const upd = data?.updated ?? 0;
-              const skp = data?.skipped ?? 0;
-              st.textContent = `✅ ${exchange}: nuevas=${ins} actualizadas=${upd} omitidas=${skp} (últimos ${days} días)`;
+                  const ins = data?.inserted ?? data?.saved ?? 0;
+                  const upd = data?.updated ?? 0;
+                  const skp = data?.skipped ?? 0;
+                  summaries.push(
+                    `✅ ${exchange}: nuevas=${ins} actualizadas=${upd} omitidas=${skp}`
+                  );
+                } catch (err) {
+                  summaries.push(`❌ ${exchange}: ${err.message}`);
+                }
+              }
+              st.innerHTML = `${summaries.join(
+                "<br>"
+              )}<br/><small>Ventana: últimos ${days} días</small>`;
 
-              // refresca la pestaña de cerradas
               try {
                 await loadClosedPositions();
               } catch (_) {}
@@ -3531,10 +4534,54 @@
               st.textContent = "❌ " + e.message;
             }
           });
+        document
+          .getElementById("btn-force-funding")
+          ?.addEventListener("click", async () => {
+            const st = document.getElementById("force-funding-status");
+            const exchanges = getCheckedValuesFromSelector(
+              ".funding-exchange-checkbox:checked"
+            );
+            const daysInput = parseInt(
+              document.getElementById("funding-force-days").value,
+              10
+            );
+            const days = Math.min(
+              90,
+              Math.max(1, Number.isFinite(daysInput) ? daysInput : 14)
+            );
+
+            if (!exchanges.length) {
+              st.textContent = "❌ Selecciona al menos un exchange.";
+              return;
+            }
+
+            st.textContent = "⏳ Cargando funding…";
+            try {
+              const res = await fetch("/api/funding/force", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ exchanges, days }),
+              });
+              const data = await res.json();
+              if (!res.ok || data?.ok === false) {
+                throw new Error(data?.error || "Funding sync error");
+              }
+
+              const resultMap = data?.results || {};
+              const lines = exchanges.map(
+                (ex) =>
+                  `✅ ${ex}: ${Number(
+                    resultMap[ex] || 0
+                  )} registros (últimos ${days} días)`
+              );
+              st.innerHTML = lines.join("<br>");
+            } catch (err) {
+              st.textContent = "❌ " + err.message;
+            }
+          });
       });
     </script>
 
-    
     <script>
       // ====== Refresh Open Positions ======
       window.loadOpenPositions = function () {
@@ -3543,172 +4590,376 @@
       };
 
       // ========================================
-    // EXCHANGE CHECKBOXES
-    // ========================================
-    document.getElementById('check-all-exchanges').addEventListener('change', function() {
-      document.querySelectorAll('.exchange-checkbox').forEach(cb => cb.checked = this.checked);
-    });
-
-    document.querySelectorAll('.exchange-checkbox').forEach(checkbox => {
-      checkbox.addEventListener('change', function() {
-        const allChecked = Array.from(document.querySelectorAll('.exchange-checkbox')).every(cb => cb.checked);
-        document.getElementById('check-all-exchanges').checked = allChecked;
-      });
-    });
-
-    function getSelectedExchanges() {
-      return Array.from(document.querySelectorAll('.exchange-checkbox:checked')).map(cb => cb.value);
-    }
-
-    // ========================================
-    // MODIFIED refreshPositions
-    // ========================================
-    async function refreshPositions() {
-      // Use full page reload to reuse the stable initial render pipeline
-      try {
-        window.location.reload();
-      } catch (e) {
-        console.error('Refresh failed:', e);
-      }
-    }
-
-    // Scoped refresh for Open Positions using selected exchanges
-    async function refreshOpenPositions() {
-      const btn = document.getElementById('refreshOpen');
-      const originalText = btn ? btn.innerText : null;
-      const exchanges = getSelectedExchanges();
-      try {
-        if (btn) {
-          btn.disabled = true;
-          btn.innerText = 'Refreshing...';
-        }
-        const hasFilter = exchanges && exchanges.length > 0;
-        const resp = await fetch('/api/positions', {
-          method: hasFilter ? 'POST' : 'GET',
-          headers: hasFilter ? { 'Content-Type': 'application/json' } : undefined,
-          body: hasFilter ? JSON.stringify({ exchanges }) : undefined,
+      // EXCHANGE CHECKBOXES
+      // ========================================
+      document
+        .getElementById("check-all-exchanges")
+        .addEventListener("change", function () {
+          document
+            .querySelectorAll(".exchange-checkbox")
+            .forEach((cb) => (cb.checked = this.checked));
         });
-        const data = await resp.json();
-        const rows = Array.isArray(data?.positions) ? data.positions : [];
-        // Re-render using the existing helper
-        renderOpenPositionsFromRows(rows);
-        // Update funding aggregates for the visible positions
-        updateFundingForOpenPositions();
-      } catch (e) {
-        console.error('Failed to refresh open positions', e);
-      } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerText = originalText || '🔄 Refresh';
-        }
-      }
-    }
 
-    // ========================================
-    // FUNDING d-2, d-1, hoy
-    // ========================================
-    async function updateFundingForOpenPositions() {
-      try {
-        const response = await fetch('/api/funding/open_positions');
-        if (!response.ok) return;
-        const data = await response.json();
-        for (const [exchange, symbols] of Object.entries(data)) {
-          for (const [symbol, funding] of Object.entries(symbols)) {
-            updatePositionFunding(exchange, symbol, funding);
-          }
-        }
-      } catch (error) {
-        console.error('Error updating funding:', error);
-      }
-    }
-
-    function updatePositionFunding(exchange, symbol, funding) {
-      const els = {
-        d2: document.querySelector(`.funding-d2[data-exchange="${exchange}"][data-symbol="${symbol}"]`),
-        d1: document.querySelector(`.funding-d1[data-exchange="${exchange}"][data-symbol="${symbol}"]`),
-        today: document.querySelector(`.funding-today[data-exchange="${exchange}"][data-symbol="${symbol}"]`)
-      };
-      if (els.d2) {
-        els.d2.textContent = '$' + formatNumber(funding.d2 || 0, 2);
-        els.d2.className = 'metric-value-sm ' + (funding.d2 >= 0 ? 'text-success' : 'text-danger');
-      }
-      if (els.d1) {
-        els.d1.textContent = '$' + formatNumber(funding.d1 || 0, 2);
-        els.d1.className = 'metric-value-sm ' + (funding.d1 >= 0 ? 'text-success' : 'text-danger');
-      }
-      if (els.today) {
-        els.today.textContent = '$' + formatNumber(funding.today || 0, 2);
-        els.today.className = 'metric-value-sm ' + (funding.today >= 0 ? 'text-success' : 'text-danger');
-      }
-    }
-
-    // ========================================
-    // EDIT MODAL
-    // ========================================
-    let currentEditPosition = null;
-
-    function openEditModal(exchange, symbol, size, upnl) {
-      currentEditPosition = {exchange, symbol, size, upnl};
-      document.getElementById('edit-symbol').value = symbol;
-      document.getElementById('edit-size-multiplier').value = 1;
-      document.getElementById('edit-upnl-multiplier').value = 1;
-      updateEditPreview();
-      new bootstrap.Modal(document.getElementById('editModal')).show();
-    }
-
-    document.getElementById('edit-size-multiplier').addEventListener('input', updateEditPreview);
-    document.getElementById('edit-upnl-multiplier').addEventListener('input', updateEditPreview);
-
-    function updateEditPreview() {
-      if (!currentEditPosition) return;
-      const sizeMultiplier = parseFloat(document.getElementById('edit-size-multiplier').value) || 1;
-      const upnlMultiplier = parseFloat(document.getElementById('edit-upnl-multiplier').value) || 1;
-      document.getElementById('preview-size').textContent = formatNumber(currentEditPosition.size * sizeMultiplier, 4);
-      document.getElementById('preview-upnl').textContent = '$' + formatNumber(currentEditPosition.upnl * upnlMultiplier, 2);
-    }
-
-    document.getElementById('save-edit-btn').addEventListener('click', function() {
-      if (!currentEditPosition) return;
-      const sizeMultiplier = parseFloat(document.getElementById('edit-size-multiplier').value) || 1;
-      const upnlMultiplier = parseFloat(document.getElementById('edit-upnl-multiplier').value) || 1;
-      applyPositionEdits(currentEditPosition.exchange, currentEditPosition.symbol, sizeMultiplier, upnlMultiplier);
-      bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
-    });
-
-    function applyPositionEdits(exchange, symbol, sizeMultiplier, upnlMultiplier) {
-      document.querySelectorAll('.position-card').forEach(card => {
-        const cardExchange = card.querySelector('.pos-header small').textContent.trim().toLowerCase();
-        const cardSymbol = card.querySelector('.pos-header .fw-bold').textContent.trim();
-        if (cardExchange === exchange.toLowerCase() && cardSymbol === symbol) {
-          const sizeEl = card.querySelector('.col:nth-child(1) .fw-bold');
-          if (sizeEl && sizeEl.textContent !== 'Size') {
-            sizeEl.textContent = formatNumber(parseFloat(sizeEl.textContent) * sizeMultiplier, 4);
-          }
-          const upnlEl = card.querySelector('.metric-value');
-          if (upnlEl) {
-            const newUpnl = parseFloat(upnlEl.textContent.replace('$', '').replace(',', '')) * upnlMultiplier;
-            upnlEl.textContent = '$' + formatNumber(newUpnl, 2);
-            upnlEl.className = 'metric-value ' + (newUpnl >= 0 ? 'text-success' : 'text-danger');
-          }
-        }
+      document.querySelectorAll(".exchange-checkbox").forEach((checkbox) => {
+        checkbox.addEventListener("change", function () {
+          syncMasterExchangeToggle();
+        });
       });
-    }
 
-    // ========================================
-    // AUTO-REFRESH (every hour at :01)
-    // ========================================
-    function scheduleHourlyRefresh() {
-      const now = new Date();
-      const minutes = now.getMinutes();
-      const minutesUntilNext01 = minutes === 0 ? 1 : 61 - minutes;
-      const msUntilNext01 = minutesUntilNext01 * 60 * 1000;
-      console.log(`⏰ Next refresh in ${minutesUntilNext01} min`);
-      setTimeout(async () => {
-        console.log('🔄 Auto-refresh at ' + new Date().toLocaleTimeString());
-        await refreshPositions();
-        scheduleHourlyRefresh();
-      }, msUntilNext01);
-    }
+      function getSelectedExchanges() {
+        return Array.from(
+          document.querySelectorAll(".exchange-checkbox:checked")
+        ).map((cb) => cb.value);
+      }
+
+      function syncMasterExchangeToggle() {
+        const master = document.getElementById("check-all-exchanges");
+        if (!master) return;
+        const checkboxes = Array.from(
+          document.querySelectorAll(".exchange-checkbox")
+        );
+        if (!checkboxes.length) {
+          master.checked = false;
+          return;
+        }
+        master.checked = checkboxes.every((cb) => cb.checked);
+      }
+
+      function applyExchangeSelection(exchanges) {
+        if (!Array.isArray(exchanges) || exchanges.length === 0) {
+          return false;
+        }
+        const desired = new Set(
+          exchanges.map((ex) => (ex || "").toLowerCase())
+        );
+        let matched = false;
+        document.querySelectorAll(".exchange-checkbox").forEach((cb) => {
+          const shouldCheck = desired.has((cb.value || "").toLowerCase());
+          cb.checked = shouldCheck;
+          matched = matched || shouldCheck;
+        });
+        if (!matched) {
+          document
+            .querySelectorAll(".exchange-checkbox")
+            .forEach((cb) => (cb.checked = true));
+          syncMasterExchangeToggle();
+          return false;
+        }
+        syncMasterExchangeToggle();
+        return true;
+      }
+
+      function setupGroupCheckbox(masterSelector, itemSelector) {
+        const master = document.querySelector(masterSelector);
+        const sync = () => {
+          if (!master) return;
+          const boxes = Array.from(document.querySelectorAll(itemSelector));
+          if (!boxes.length) {
+            master.checked = false;
+            return;
+          }
+          master.checked = boxes.every((cb) => cb.checked);
+        };
+
+        if (master) {
+          master.addEventListener("change", () => {
+            document.querySelectorAll(itemSelector).forEach((cb) => {
+              cb.checked = master.checked;
+            });
+          });
+        }
+
+        document.querySelectorAll(itemSelector).forEach((cb) => {
+          cb.addEventListener("change", () => sync());
+        });
+
+        sync();
+      }
+
+      function getCheckedValuesFromSelector(selector) {
+        return Array.from(document.querySelectorAll(selector))
+          .filter((cb) => cb.checked)
+          .map((cb) => cb.value);
+      }
+
+      async function hydrateExchangeSelection() {
+        try {
+          const resp = await fetch("/api/positions/exchanges");
+          if (!resp.ok) return;
+          const data = await resp.json();
+          applyExchangeSelection(
+            Array.isArray(data?.exchanges) ? data.exchanges : []
+          );
+        } catch (err) {
+          console.error(
+            "No se pudieron cargar las preferencias de exchanges",
+            err
+          );
+        } finally {
+          syncMasterExchangeToggle();
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        setupGroupCheckbox("#force-check-all", ".force-exchange-checkbox");
+        setupGroupCheckbox("#funding-check-all", ".funding-exchange-checkbox");
+        hydrateExchangeSelection()
+          .catch((err) => {
+            console.error(
+              "❌ No se pudieron cargar las preferencias de exchanges:",
+              err
+            );
+          })
+          .finally(() => {
+            loadFundingData()
+              .then(() => console.log("✅ Funding data loaded"))
+              .catch((err) =>
+                console.error("❌ Error loading funding data:", err)
+              );
+            try {
+              refreshOpenPositions();
+            } catch (err) {
+              console.error(
+                "No se pudieron refrescar las posiciones al iniciar",
+                err
+              );
+            }
+          });
+      });
+
+      // ========================================
+      // MODIFIED refreshPositions
+      // ========================================
+      async function refreshPositions() {
+        // Use full page reload to reuse the stable initial render pipeline
+        try {
+          window.location.reload();
+        } catch (e) {
+          console.error("Refresh failed:", e);
+        }
+      }
+
+      // Scoped refresh for Open Positions using selected exchanges
+      async function refreshOpenPositions() {
+        const btn = document.getElementById("refreshOpen");
+        const originalText = btn ? btn.innerText : null;
+        const exchanges = getSelectedExchanges();
+        try {
+          if (btn) {
+            btn.disabled = true;
+            btn.innerText = "Refreshing...";
+          }
+          const hasFilter = exchanges && exchanges.length > 0;
+          const resp = await fetch("/api/positions", {
+            method: hasFilter ? "POST" : "GET",
+            headers: hasFilter
+              ? { "Content-Type": "application/json" }
+              : undefined,
+            body: hasFilter ? JSON.stringify({ exchanges }) : undefined,
+          });
+          const data = await resp.json();
+          const rows = Array.isArray(data?.positions) ? data.positions : [];
+          // Re-render using the existing helper
+          renderOpenPositionsFromRows(rows);
+          // Update funding aggregates for the visible positions
+          updateFundingForOpenPositions();
+        } catch (e) {
+          console.error("Failed to refresh open positions", e);
+        } finally {
+          if (btn) {
+            btn.disabled = false;
+            btn.innerText = originalText || "🔄 Refresh";
+          }
+        }
+      }
+
+      // ========================================
+      // FUNDING d-2, d-1, hoy
+      // ========================================
+      async function updateFundingForOpenPositions() {
+        // Esperar a que allFundingData esté cargado
+        if (!window.allFundingData || !window.allFundingData.length) {
+          console.log("⏳ Waiting for funding data to load...");
+          return;
+        }
+
+        // Obtener todas las posiciones visibles en la UI
+        const positionCards = document.querySelectorAll(
+          "[data-symbol][data-exchange]"
+        );
+
+        positionCards.forEach((card) => {
+          const baseSymbol = card.getAttribute("data-symbol");
+          const exchange = card.getAttribute("data-exchange");
+
+          if (!baseSymbol) return;
+
+          // Calcular funding para los últimos 3 días usando allFundingData
+          const f3 = fundingLast3Days(baseSymbol);
+
+          updatePositionFunding(exchange, baseSymbol, {
+            d2: f3.d2,
+            d1: f3.d1,
+            today: f3.d0,
+          });
+        });
+      }
+
+      function updatePositionFunding(exchange, baseSymbol, funding) {
+        const els = {
+          d2: document.querySelector(
+            `.funding-d2[data-exchange="${exchange}"][data-symbol="${baseSymbol}"]`
+          ),
+          d1: document.querySelector(
+            `.funding-d1[data-exchange="${exchange}"][data-symbol="${baseSymbol}"]`
+          ),
+          today: document.querySelector(
+            `.funding-today[data-exchange="${exchange}"][data-symbol="${baseSymbol}"]`
+          ),
+        };
+        if (els.d2) {
+          els.d2.textContent = "$" + formatNumber(funding.d2 || 0, 2);
+          els.d2.className =
+            "metric-value-sm funding-d2 " +
+            (funding.d2 >= 0 ? "text-success" : "text-danger");
+        }
+        if (els.d1) {
+          els.d1.textContent = "$" + formatNumber(funding.d1 || 0, 2);
+          els.d1.className =
+            "metric-value-sm funding-d1 " +
+            (funding.d1 >= 0 ? "text-success" : "text-danger");
+        }
+        if (els.today) {
+          els.today.textContent = "$" + formatNumber(funding.today || 0, 2);
+          els.today.className =
+            "metric-value-sm funding-today " +
+            (funding.today >= 0 ? "text-success" : "text-danger");
+        }
+      }
+
+      // ========================================
+      // EDIT MODAL
+      // ========================================
+      let currentEditPosition = null;
+
+      function openEditModal(position) {
+        currentEditPosition = position;
+        document.getElementById("edit-exchange").value =
+          position?.exchange || "";
+        document.getElementById("edit-symbol").value = position?.symbol || "";
+        document.getElementById("edit-side").value = (
+          position?.side || "long"
+        ).toLowerCase();
+        document.getElementById("edit-size").value = position?.size || "";
+        document.getElementById("edit-entry-price").value =
+          position?.entry_price || "";
+        document.getElementById("edit-liq").value =
+          position?.liquidation_price || "";
+        document.getElementById("edit-fees").value = position?.fee || "";
+        document.getElementById("edit-funding").value =
+          position?.funding_fee || "";
+        document.getElementById("edit-realized-pnl").value =
+          position?.realized_pnl || "";
+        document.getElementById("edit-init-margin").value =
+          position?.init_margin || "";
+        document.getElementById("edit-margin").value =
+          position?.main_margin || "";
+        new bootstrap.Modal(document.getElementById("editModal")).show();
+      }
+
+      document
+        .getElementById("save-edit-btn")
+        .addEventListener("click", async function () {
+          if (!currentEditPosition) return;
+
+          const updates = {
+            exchange: currentEditPosition.exchange,
+            symbol: currentEditPosition.symbol,
+            side: document.getElementById("edit-side").value || null,
+            size:
+              parseFloat(document.getElementById("edit-size").value) || null,
+            entry_price:
+              parseFloat(document.getElementById("edit-entry-price").value) ||
+              null,
+            liquidation_price:
+              parseFloat(document.getElementById("edit-liq").value) || null,
+            fee: parseFloat(document.getElementById("edit-fees").value) || null,
+            funding_fee:
+              parseFloat(document.getElementById("edit-funding").value) || null,
+            realized_pnl:
+              parseFloat(document.getElementById("edit-realized-pnl").value) ||
+              null,
+            init_margin:
+              parseFloat(document.getElementById("edit-init-margin").value) ||
+              null,
+            main_margin:
+              parseFloat(document.getElementById("edit-margin").value) || null,
+            updated_at: Date.now(),
+          };
+
+          try {
+            const response = await fetch("/api/positions/update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(updates),
+            });
+
+            if (!response.ok) {
+              throw new Error("Failed to save position updates");
+            }
+
+            // Close modal
+            bootstrap.Modal.getInstance(
+              document.getElementById("editModal")
+            ).hide();
+
+            // Show success message
+            alert(
+              "Position updated successfully! Refresh manually to see changes."
+            );
+          } catch (error) {
+            console.error("Error saving position:", error);
+            alert("Error saving position: " + error.message);
+          }
+        });
+
+      // ========================================
+      // AUTO-REFRESH (every hour at :01)
+      // ========================================
+      function scheduleHourlyRefresh() {
+        const computeDelay = () => {
+          const now = new Date();
+          const target = new Date(now);
+          if (now.getMinutes() >= 1) {
+            target.setHours(target.getHours() + 1);
+          }
+          target.setMinutes(1, 0, 0);
+          const diff = target.getTime() - now.getTime();
+          // Garantiza un mínimo de 5 segundos para evitar bucles muy rápidos
+          return Math.max(diff, 5000);
+        };
+
+        const scheduleNext = () => {
+          const delay = computeDelay();
+          const minutes = Math.round(delay / 60000);
+          console.log(`⏰ Próximo auto-refresh en ${minutes} min`);
+          setTimeout(async () => {
+            console.log(
+              "🔄 Auto-refresh (cache selection) " +
+                new Date().toLocaleTimeString()
+            );
+            try {
+              await refreshOpenPositions();
+            } catch (err) {
+              console.error("Auto-refresh failed", err);
+            } finally {
+              scheduleNext();
+            }
+          }, delay);
+        };
+
+        scheduleNext();
+      }
 
       // Botón de refresh
       document.addEventListener("DOMContentLoaded", function () {
@@ -3719,6 +4970,7 @@
             refreshOpenPositions();
           });
         }
+        scheduleHourlyRefresh();
       });
     </script>
 
@@ -3749,6 +5001,12 @@
             const fd = new FormData(form);
             const payload = Object.fromEntries(fd.entries());
 
+            // Convertir datetime-local a epoch seconds
+            if (payload.open_time) {
+              const dateValue = new Date(payload.open_time);
+              payload.open_time = Math.floor(dateValue.getTime() / 1000);
+            }
+
             try {
               const res = await fetch("/api/open/manual/add", {
                 method: "POST",
@@ -3760,10 +5018,8 @@
                 throw new Error(data.error || "Error saving manual open");
               if (manualOpenMsg) manualOpenMsg.textContent = "✅ Saved";
               modalManualOpen && modalManualOpen.hide();
-              // recargar open positions si existe la función
-              try {
-                window.loadOpenPositions && window.loadOpenPositions();
-              } catch (e) {}
+              // No auto-refresh - user will refresh manually
+              alert("Manual position added! Refresh to see it.");
             } catch (e) {
               if (manualOpenMsg) manualOpenMsg.textContent = "❌ " + e.message;
             }
@@ -3846,9 +5102,48 @@
               id;
             modalSendClosed && modalSendClosed.show();
           }
-              scheduleHourlyRefresh();
         });
       })();
+    </script>
+
+    <!-- Auto-reload for development - DESACTIVADO -->
+    <!-- Para ver cambios al momento: simplemente recarga con F5 o Ctrl+R -->
+    <!-- Flask con debug=True ya recarga automáticamente el servidor -->
+    <script>
+      // Auto-reload desactivado para evitar spam en consola
+      // Si quieres activarlo, descomenta el código de abajo
+      /*
+      if (
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1"
+      ) {
+        let lastModified = null;
+
+        setInterval(async () => {
+          try {
+            const response = await fetch(window.location.href, {
+              method: "HEAD",
+              cache: "no-cache",
+            });
+
+            const currentModified = response.headers.get("Last-Modified");
+
+            if (
+              lastModified &&
+              currentModified &&
+              lastModified !== currentModified
+            ) {
+              console.log("🔄 Cambios detectados, recargando página...");
+              window.location.reload();
+            }
+
+            lastModified = currentModified;
+          } catch (e) {
+            // Silently fail if server is down
+          }
+        }, 1000); // Chequea cada segundo
+      }
+      */
     </script>
   </body>
 </html>
